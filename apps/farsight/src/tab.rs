@@ -46,6 +46,7 @@ pub enum TabScreen {
 
 /// What identifies one connection attempt (drives the subscription).
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // Independent connection options.
 pub struct ConnectRequest {
     pub tab: TabId,
     pub host: String,
@@ -54,6 +55,7 @@ pub struct ConnectRequest {
     pub shared: bool,
     pub quality: Option<u8>,
     pub compress: Option<u8>,
+    pub no_jpeg: bool,
     pub allow_insecure: bool,
     pub pinned: Option<Fingerprint>,
 }
@@ -173,7 +175,10 @@ impl Tab {
     pub fn title(&self) -> String {
         self.connected
             .as_ref()
-            .map_or_else(|| self.address.display_name(), |c| c.name.clone())
+            .map(|c| c.name.clone())
+            // A server could blank its name; never show an empty title.
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| self.address.display_name())
     }
 
     /// Whether the desktop is live and has a picture (input goes here).
@@ -317,6 +322,7 @@ impl Tab {
                 identity,
                 ..
             } => {
+                let name = farsight_discovery::sanitize_name(&name);
                 store.remember(&self.address, &name, identity, self.pending_remember.take());
                 self.connected = Some(Connected {
                     name,
@@ -324,6 +330,12 @@ impl Tab {
                     encrypted,
                 });
                 self.screen = TabScreen::Desktop;
+            }
+            SessionEvent::Renamed(name) => {
+                if let Some(connected) = &mut self.connected {
+                    // The server chooses it: no control or bidi tricks in titles.
+                    connected.name = farsight_discovery::sanitize_name(&name);
+                }
             }
             SessionEvent::Clipboard(text) => return Outcome::Task(iced::clipboard::write(text)),
             SessionEvent::TransportUpgrade(_)
@@ -827,6 +839,7 @@ pub fn connection(
             shared: request.shared,
             quality: request.quality,
             compress: request.compress,
+            no_jpeg: request.no_jpeg,
             allow_insecure: request.allow_insecure,
             ..SessionConfig::default()
         };

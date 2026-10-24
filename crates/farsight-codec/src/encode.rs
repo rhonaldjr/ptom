@@ -1,17 +1,40 @@
-//! Server-side encoders: Raw, CopyRect, ZRLE ([`ZrleEncoder`]), Tight
-//! without JPEG ([`TightEncoder`]), and the Cursor, `CursorWithAlpha` and
-//! `ExtendedDesktopSize` pseudo-encodings. Every encoder's output decodes with
+//! Server-side encoders: Raw, CopyRect, RRE, Hextile, ZRLE ([`ZrleEncoder`]),
+//! Tight with JPEG ([`TightEncoder`]), and the Cursor, `CursorWithAlpha`,
+//! `ExtendedDesktopSize` and `DesktopName` pseudo-encodings. Every encoder's output decodes with
 //! [`crate::Decoder`] to the same pixels (property-tested in both directions).
 
+mod hextile;
 mod palette;
+mod rre;
+mod subrects;
 mod tight;
 mod zrle;
 
 use farsight_rfb::wire::WriteExt;
 use farsight_rfb::{DecodeError, Encoding, Rect, Screen};
 
-pub use tight::{TIGHT_MAX_AREA, TIGHT_MAX_WIDTH, TightEncoder};
+pub use hextile::hextile;
+pub use rre::rre;
+pub use tight::{TIGHT_MAX_AREA, TIGHT_MAX_WIDTH, TightEncoder, jpeg_capable};
 pub use zrle::ZrleEncoder;
+
+/// Longest desktop name sent or accepted (`DesktopName` pseudo-encoding).
+pub const MAX_DESKTOP_NAME: usize = 1024;
+
+/// Encodes a `DesktopName` pseudo-rectangle payload: length then UTF-8,
+/// cut at [`MAX_DESKTOP_NAME`] bytes on a character boundary.
+#[must_use]
+pub fn desktop_name(name: &str) -> Vec<u8> {
+    let mut end = name.len().min(MAX_DESKTOP_NAME);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    let bytes = name.as_bytes().get(..end).unwrap_or_default();
+    let mut out = Vec::with_capacity(4 + bytes.len());
+    out.put_u32(u32::try_from(bytes.len()).unwrap_or(0));
+    out.extend_from_slice(bytes);
+    out
+}
 
 use crate::{Cursor, Framebuffer, PixelConverter};
 

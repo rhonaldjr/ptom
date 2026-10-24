@@ -149,6 +149,8 @@ fn viewer_config(auth: Sec) -> SessionConfig {
         username,
         password,
         shared: true,
+        // These tests compare pixels exactly; JPEG has its own test.
+        no_jpeg: true,
         ..SessionConfig::default()
     }
 }
@@ -919,4 +921,121 @@ fn nothing_is_sent_while_the_desktop_is_unchanged() {
     w.desktop.update(w.desktop.framebuffer().clone(), None);
     w.server.frame_ready(&w.desktop).unwrap();
     assert_eq!(w.server.take_output(), []);
+}
+
+// --- M8: streaming -----------------------------------------------------------
+
+fn change(desktop: &mut Desktop, n: u32) {
+    let mut frame = desktop.framebuffer().clone();
+    frame
+        .fill(Rect::new(0, 0, 8, 8), 0x0001_0101 * (n % 200))
+        .unwrap();
+    desktop.update(frame, Some(&[Rect::new(0, 0, 8, 8)]));
+}
+
+fn updates(events: &[ViewerEvent]) -> usize {
+    events
+        .iter()
+        .filter(|e| matches!(e, ViewerEvent::UpdateComplete))
+        .count()
+}
+
+#[test]
+fn continuous_updates_flow_without_requests_within_the_congestion_window() {
+    let mut w = World::new(Sec::None);
+    w.run().unwrap();
+    assert!(
+        w.viewer.continuous_updates(),
+        "the viewer switched to continuous updates"
+    );
+    w.assert_in_sync();
+
+    // The viewer falls behind (its fence replies are delayed): the agent
+    // sends at most two more updates, however much changes.
+    let before = updates(&w.viewer_events);
+    let mut delayed = Vec::new();
+    for n in 0..10 {
+        change(&mut w.desktop, n);
+        w.server.frame_ready(&w.desktop).unwrap();
+        w.viewer.receive(&w.server.take_output());
+        let events = w.viewer.poll().unwrap();
+        w.viewer_events.extend(events);
+        delayed.extend(w.viewer.take_output());
+    }
+    let sent = updates(&w.viewer_events) - before;
+    assert!(
+        (1..=2).contains(&sent),
+        "{sent} updates sent without acknowledgement"
+    );
+
+    // The replies arrive: the window opens and the viewer catches up
+    // without ever asking for an update.
+    w.server.receive(&delayed);
+    w.server.poll().unwrap();
+    w.run().unwrap();
+    w.assert_in_sync();
+}
+
+#[test]
+fn photo_areas_go_as_jpeg_when_the_viewer_allows_it() {
+    let viewer = SessionConfig {
+        no_jpeg: false,
+        ..viewer_config(Sec::None)
+    };
+    let mut w = World::with(server_config(Sec::None), viewer, gradient_desktop(200, 140));
+    w.run().unwrap();
+    let (got, want) = (w.viewer.framebuffer(), w.desktop.framebuffer());
+    assert_ne!(got, want, "JPEG is lossy, so not pixel-exact");
+    let worst = got
+        .pixels()
+        .iter()
+        .zip(want.pixels())
+        .flat_map(|(a, b)| {
+            (0..3).map(move |c| ((a >> (c * 8)) & 0xff).abs_diff((b >> (c * 8)) & 0xff))
+        })
+        .max()
+        .unwrap();
+    assert!(
+        worst < 160,
+        "still recognisably the same image (worst {worst})"
+    );
+}
+
+#[test]
+fn a_renamed_desktop_is_announced() {
+    let mut w = World::new(Sec::None);
+    w.run().unwrap();
+    w.desktop.set_name("alice's headless desktop");
+    w.run().unwrap();
+    assert!(
+        w.viewer_events
+            .iter()
+            .any(|e| matches!(e, ViewerEvent::Renamed(name) if name == "alice's headless desktop"))
+    );
+}
+
+#[test]
+fn disabling_continuous_updates_is_confirmed_and_requests_resume() {
+    let mut w = World::new(Sec::None);
+    w.run().unwrap();
+    assert!(w.viewer.continuous_updates());
+    // As if the viewer turned them off (e.g. to resynchronise).
+    let mut disable = Vec::new();
+    ClientMessage::EnableContinuousUpdates {
+        enable: false,
+        rect: Rect::new(0, 0, 100, 70),
+    }
+    .encode(&mut disable)
+    .unwrap();
+    w.server.receive(&disable);
+    w.server.poll().unwrap();
+    w.run().unwrap();
+    assert!(
+        !w.viewer.continuous_updates(),
+        "the agent confirmed with EndOfContinuousUpdates"
+    );
+    // The viewer asks for updates again and keeps up.
+    change(&mut w.desktop, 7);
+    w.run().unwrap();
+    w.assert_in_sync();
 }

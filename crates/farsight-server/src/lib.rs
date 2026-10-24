@@ -24,6 +24,7 @@ pub mod damage;
 mod desktop;
 pub mod ports;
 mod security;
+mod select;
 mod session;
 mod update;
 

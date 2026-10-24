@@ -115,7 +115,13 @@ impl ServerSessionConfig {
             prompt_non_owner: true,
             view_only: false,
             send_clipboard: true,
-            encodings: vec![Encoding::Tight, Encoding::Zrle, Encoding::Raw],
+            encodings: vec![
+                Encoding::Tight,
+                Encoding::Zrle,
+                Encoding::Hextile,
+                Encoding::Rre,
+                Encoding::Raw,
+            ],
             max_version: ProtocolVersion::V3_8,
             limits: Limits {
                 max_cut_text: DEFAULT_MAX_CLIPBOARD,
@@ -523,6 +529,10 @@ impl ServerSession {
                 };
                 update.reply_to_resize(outcome.status_code());
             }
+            ClientMessage::EnableContinuousUpdates { enable, rect } => {
+                update.enable_continuous(enable, rect);
+            }
+            ClientMessage::Fence { flags, payload } => update.fence(flags, payload),
             // View-only input, and SetDesktopSize without negotiation.
             _ => {}
         }

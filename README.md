@@ -45,7 +45,8 @@ Sharing and other VNC software.
 | ✅ M5 | Share your X11 desktop |
 | ✅ M6 | Tabs, windows and the tray icon |
 | ✅ M7 | Desktops that keep running in the background |
-| M8–M10 | Speed, wider compatibility, and hardware acceleration |
+| ✅ M8 | Faster, smaller updates: every VNC encoding, automatic JPEG for photos, smooth streaming |
+| M9–M10 | Wider compatibility, and hardware acceleration |
 
 The full plan is in [docs/roadmap/ROADMAP.md](docs/roadmap/ROADMAP.md).
 
@@ -139,6 +140,8 @@ farsight-passwd vncauth set         # a password for older viewers (weak; for co
 farsight-passwd import              # bring over an existing ~/.vnc/passwd
 ```
 - Resizing the window resizes the remote desktop when the server allows it (turn this off with `-RemoteResize=0`).
+- Photos and videos are sent as JPEG to save bandwidth; text and windows stay sharp. Use `-NoJPEG` for exact
+  pixels everywhere, or `-QualityLevel 0-9` to trade quality for speed.
 - Farsight accepts TigerVNC's `vncviewer` options. Run `farsight --help` to see them.
 
 ## Build locally
@@ -172,6 +175,8 @@ cargo test --workspace       # run the tests
   cargo test --workspace
   scripts/check-layers.sh       # needs jq
   ```
+- Benchmarks: `cargo bench -p farsight-codec -p farsight-server` (results and baselines in
+  [docs/performance/baselines.md](docs/performance/baselines.md)).
 - Headless desktop tests (need Xwayland 23.1+ for the X11 part, and foot): `cargo test -p farsight-headless` and
   `tests/e2e/agent-headless.sh`.
 - Interop test against a real TigerVNC server:
@@ -188,3 +193,6 @@ cargo test --workspace       # run the tests
 ## License
 
 MIT. Farsight is written from scratch from the public VNC specification and contains no code from other VNC projects.
+
+This software is based in part on the work of the Independent JPEG Group (through the `jpeg-encoder` crate, used
+for Tight JPEG).

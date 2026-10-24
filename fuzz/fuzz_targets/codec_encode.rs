@@ -63,7 +63,7 @@ fuzz_target!(|data: &[u8]| {
     .expect("fill");
     let mut zrle = ZrleEncoder::new(level % 10);
     let mut tight = TightEncoder::new(level % 10);
-    let mut decoders = [Encoding::Raw, Encoding::Zrle, Encoding::Tight]
+    let mut decoders = [Encoding::Raw, Encoding::Rre, Encoding::Hextile, Encoding::Zrle, Encoding::Tight]
         .map(|e| (e, Decoder::new(w, h, format, Limits::DEFAULT)));
     let mut reference = Decoder::new(w, h, format, Limits::DEFAULT);
     for spec in rects.chunks_exact(4) {
@@ -85,6 +85,10 @@ fuzz_target!(|data: &[u8]| {
             let payload = match encoding {
                 Encoding::Zrle => zrle.encode(&fb, rect, &conv).expect("zrle"),
                 Encoding::Tight => tight.encode(&fb, rect, &conv).expect("tight"),
+                Encoding::Rre => encode::rre(&fb, rect, &conv, usize::MAX)
+                    .expect("rre")
+                    .expect("unlimited subrects"),
+                Encoding::Hextile => encode::hextile(&fb, rect, &conv).expect("hextile"),
                 _ => raw.clone(),
             };
             let header = RectHeader {
@@ -99,6 +103,18 @@ fuzz_target!(|data: &[u8]| {
                 decoder.framebuffer().read(rect),
                 reference.framebuffer().read(rect)
             );
+        }
+        // Lossy, so only "decodes, fully" is checked.
+        if let Some(jpeg) = tight
+            .encode_jpeg(&fb, rect, &conv, spec[3] % 10)
+            .expect("jpeg")
+        {
+            let mut lossy = Decoder::new(w, h, format, Limits::DEFAULT);
+            let header = RectHeader {
+                rect,
+                encoding: Encoding::Tight,
+            };
+            assert_eq!(lossy.decode_rect(&header, &jpeg), Ok(Some(jpeg.len())));
         }
         if spec[0] & 1 == 1 {
             tight.set_compress_level(spec[1] % 10);

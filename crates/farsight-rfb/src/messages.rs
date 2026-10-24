@@ -17,6 +17,8 @@ mod client_type {
     pub const KEY_EVENT: u8 = 4;
     pub const POINTER_EVENT: u8 = 5;
     pub const CLIENT_CUT_TEXT: u8 = 6;
+    pub const ENABLE_CONTINUOUS_UPDATES: u8 = 150;
+    pub const FENCE: u8 = 248;
     pub const SET_DESKTOP_SIZE: u8 = 251;
 }
 
@@ -26,6 +28,26 @@ mod server_type {
     pub const SET_COLOUR_MAP_ENTRIES: u8 = 1;
     pub const BELL: u8 = 2;
     pub const SERVER_CUT_TEXT: u8 = 3;
+    pub const END_OF_CONTINUOUS_UPDATES: u8 = 150;
+    pub const FENCE: u8 = 248;
+}
+
+/// Most bytes a fence may carry (rfbproto "Fence").
+pub const MAX_FENCE_PAYLOAD: usize = 64;
+
+/// Fence flags (rfbproto "Fence").
+pub mod fence {
+    /// Finish everything before this fence before handling it.
+    pub const BLOCK_BEFORE: u32 = 1 << 0;
+    /// Handle nothing after this fence until it is handled.
+    pub const BLOCK_AFTER: u32 = 1 << 1;
+    /// Answer only after the next message has been handled.
+    pub const SYNC_NEXT: u32 = 1 << 2;
+    /// This fence asks for a reply (the reply clears this bit).
+    pub const REQUEST: u32 = 1 << 31;
+    /// Every flag rfbproto defines (this crate's peers honour only
+    /// [`BLOCK_BEFORE`], which in-order handling gives for free).
+    pub const SUPPORTED: u32 = BLOCK_BEFORE | BLOCK_AFTER | SYNC_NEXT | REQUEST;
 }
 
 /// Clipboard text carried by `ClientCutText` / `ServerCutText` (ISO 8859-1).
@@ -99,6 +121,21 @@ pub enum ClientMessage {
         /// Requested screen layout (at most 255 screens).
         screens: Vec<Screen>,
     },
+    /// Turn continuous updates on (for `rect`) or off (rfbproto, needs the
+    /// `ContinuousUpdates` pseudo-encoding).
+    EnableContinuousUpdates {
+        /// On or off.
+        enable: bool,
+        /// The area to keep up to date.
+        rect: Rect,
+    },
+    /// A synchronisation point (rfbproto, needs the `Fence` pseudo-encoding).
+    Fence {
+        /// [`fence`] flags.
+        flags: u32,
+        /// Opaque bytes echoed back in the reply (at most 64).
+        payload: Vec<u8>,
+    },
 }
 
 impl ClientMessage {
@@ -170,6 +207,15 @@ impl ClientMessage {
                 for screen in screens {
                     screen.encode(out);
                 }
+            }
+            Self::EnableContinuousUpdates { enable, rect } => {
+                out.put_u8(client_type::ENABLE_CONTINUOUS_UPDATES);
+                out.put_u8(u8::from(*enable));
+                put_rect(out, *rect);
+            }
+            Self::Fence { flags, payload } => {
+                out.put_u8(client_type::FENCE);
+                put_fence(out, *flags, payload)?;
             }
         }
         Ok(())
@@ -243,6 +289,14 @@ impl ClientMessage {
                     screens,
                 }
             }
+            client_type::ENABLE_CONTINUOUS_UPDATES => Self::EnableContinuousUpdates {
+                enable: r.u8()? != 0,
+                rect: read_rect(&mut r)?,
+            },
+            client_type::FENCE => {
+                let (flags, payload) = read_fence(&mut r)?;
+                Self::Fence { flags, payload }
+            }
             other => return Err(DecodeError::UnknownMessageType(other)),
         };
         Ok((message, r.consumed()))
@@ -272,6 +326,16 @@ pub enum ServerMessage {
     Bell,
     /// Clipboard contents from the server.
     ServerCutText(CutText),
+    /// Continuous updates stopped (also sent once, unprompted, to show the
+    /// server supports them).
+    EndOfContinuousUpdates,
+    /// A synchronisation point.
+    Fence {
+        /// [`fence`] flags.
+        flags: u32,
+        /// Opaque bytes echoed back in the reply (at most 64).
+        payload: Vec<u8>,
+    },
 }
 
 /// `rects` value meaning "terminated by a `LastRect` rectangle".
@@ -313,6 +377,11 @@ impl ServerMessage {
                 out.put_padding(3);
                 put_cut_text(out, text)?;
             }
+            Self::EndOfContinuousUpdates => out.put_u8(server_type::END_OF_CONTINUOUS_UPDATES),
+            Self::Fence { flags, payload } => {
+                out.put_u8(server_type::FENCE);
+                put_fence(out, *flags, payload)?;
+            }
         }
         Ok(())
     }
@@ -348,6 +417,11 @@ impl ServerMessage {
             server_type::SERVER_CUT_TEXT => {
                 r.skip(3)?;
                 Self::ServerCutText(read_cut_text(&mut r, limits)?)
+            }
+            server_type::END_OF_CONTINUOUS_UPDATES => Self::EndOfContinuousUpdates,
+            server_type::FENCE => {
+                let (flags, payload) = read_fence(&mut r)?;
+                Self::Fence { flags, payload }
             }
             other => return Err(DecodeError::UnknownMessageType(other)),
         };
@@ -386,6 +460,37 @@ impl RectHeader {
             encoding: Encoding::from_code(r.i32()?),
         })
     }
+}
+
+/// Fence body after the type byte: 3 padding, flags, length, payload.
+fn put_fence(out: &mut Vec<u8>, flags: u32, payload: &[u8]) -> Result<(), DecodeError> {
+    let len = u8::try_from(payload.len())
+        .ok()
+        .filter(|len| usize::from(*len) <= MAX_FENCE_PAYLOAD)
+        .ok_or(DecodeError::LimitExceeded {
+            what: "fence payload",
+            len: payload.len() as u64,
+            max: MAX_FENCE_PAYLOAD as u64,
+        })?;
+    out.put_padding(3);
+    out.put_u32(flags);
+    out.put_u8(len);
+    out.extend_from_slice(payload);
+    Ok(())
+}
+
+fn read_fence(r: &mut Reader<'_>) -> Result<(u32, Vec<u8>), DecodeError> {
+    r.skip(3)?;
+    let flags = r.u32()?;
+    let len = usize::from(r.u8()?);
+    if len > MAX_FENCE_PAYLOAD {
+        return Err(DecodeError::LimitExceeded {
+            what: "fence payload",
+            len: len as u64,
+            max: MAX_FENCE_PAYLOAD as u64,
+        });
+    }
+    Ok((flags, r.bytes(len)?.to_vec()))
 }
 
 fn put_rect(out: &mut Vec<u8>, rect: Rect) {

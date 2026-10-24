@@ -48,6 +48,7 @@ pub struct Desktop {
     clipboard_serial: u64,
     /// Monitor layout set by a headless desktop; empty means one screen.
     screens: Vec<Screen>,
+    name_serial: u64,
 }
 
 impl Desktop {
@@ -66,7 +67,18 @@ impl Desktop {
             clipboard: None,
             clipboard_serial: 0,
             screens: Vec::new(),
+            name_serial: 0,
         }
+    }
+
+    /// Renames the desktop; viewers that understand `DesktopName` are told.
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+        self.name_serial += 1;
+    }
+
+    pub(crate) fn name_serial(&self) -> u64 {
+        self.name_serial
     }
 
     /// The current frame.

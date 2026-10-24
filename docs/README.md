@@ -16,3 +16,4 @@
 | [reviews/](reviews/) | Persona code-review records and their resolutions |
 | [security/threat-model.md](security/threat-model.md) | Threat model and accepted risks |
 | [testing/](testing/README.md) | Test strategy and exploratory charters |
+| [performance/baselines.md](performance/baselines.md) | Benchmarks and performance baselines (M8) |

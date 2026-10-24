@@ -55,7 +55,13 @@ fuzz_target!(|data: &[u8]| {
     config.vnc_password = Some(SecretString::from("pw".to_owned()));
     config.view_only = options & 2 != 0;
     config.encodings = match (options >> 2) & 3 {
-        0 => vec![Encoding::Tight, Encoding::Zrle, Encoding::Raw],
+        0 => vec![
+            Encoding::Tight,
+            Encoding::Zrle,
+            Encoding::Hextile,
+            Encoding::Rre,
+            Encoding::Raw,
+        ],
         1 => vec![Encoding::Zrle],
         2 => vec![Encoding::Raw],
         _ => vec![Encoding::Tight],

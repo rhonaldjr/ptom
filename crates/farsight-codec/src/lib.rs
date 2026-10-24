@@ -23,6 +23,7 @@ mod framebuffer;
 mod hextile;
 mod inflate;
 mod pixel;
+mod rre;
 mod tight;
 mod util;
 mod zrle;

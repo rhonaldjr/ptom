@@ -438,6 +438,7 @@ impl App {
             shared: self.options.shared,
             quality: self.options.quality,
             compress: self.options.compress,
+            no_jpeg: self.options.no_jpeg,
             allow_insecure,
             pinned: known.pinned,
         };

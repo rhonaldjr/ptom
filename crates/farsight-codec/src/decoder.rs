@@ -25,6 +25,8 @@ pub struct Decoder {
     screens: Vec<Screen>,
     extended_resize: bool,
     last_resize: Option<DesktopResize>,
+    /// A new desktop name, until taken with [`Self::take_name`].
+    name: Option<String>,
 }
 
 impl Decoder {
@@ -42,7 +44,28 @@ impl Decoder {
             screens: Vec::new(),
             extended_resize: false,
             last_resize: None,
+            name: None,
         }
+    }
+
+    /// The desktop name the server last announced, once.
+    pub fn take_name(&mut self) -> Option<String> {
+        self.name.take()
+    }
+
+    fn desktop_name(&mut self, input: &[u8]) -> Result<Option<usize>, DecodeError> {
+        let mut r = Reader::new(input);
+        let len = usize::try_from(need!(r.u32())).unwrap_or(usize::MAX);
+        if len > crate::encode::MAX_DESKTOP_NAME {
+            return Err(DecodeError::LimitExceeded {
+                what: "desktop name",
+                len: len as u64,
+                max: crate::encode::MAX_DESKTOP_NAME as u64,
+            });
+        }
+        let bytes = need!(r.bytes(len));
+        self.name = Some(String::from_utf8_lossy(bytes).into_owned());
+        Ok(Some(r.consumed()))
     }
 
     /// The decoded screen.
@@ -180,6 +203,10 @@ impl RectDecoder for Decoder {
             Encoding::ExtendedDesktopSize => self.extended_desktop_size(header, input),
             Encoding::Raw => self.raw(header, input),
             Encoding::CopyRect => self.copy_rect(header, input),
+            Encoding::Rre => {
+                crate::rre::decode(&mut self.framebuffer, &self.converter, rect, input)
+            }
+            Encoding::DesktopName => self.desktop_name(input),
             Encoding::Hextile => {
                 hextile::decode(&mut self.framebuffer, &self.converter, rect, input)
             }

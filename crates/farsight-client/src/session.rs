@@ -3,6 +3,7 @@
 use farsight_codec::{Decoder, Framebuffer};
 use farsight_rfb::auth::{AuthRequest, AuthResponse, Authenticator, NoAuth, TransportUpgrade};
 use farsight_rfb::client::{ClientConfig, ClientConnection, ClientEvent};
+use farsight_rfb::messages::fence;
 use farsight_rfb::{
     ClientMessage, CutText, Encoding, Limits, PixelFormat, ProtocolError, Rect, RectHeader, Screen,
     SecurityType,
@@ -59,6 +60,8 @@ pub struct SessionConfig {
     pub quality: Option<u8>,
     /// Compression level 0–9.
     pub compress: Option<u8>,
+    /// Never ask for JPEG (TigerVNC `-NoJPEG`): every pixel arrives exactly.
+    pub no_jpeg: bool,
 }
 
 /// Where the session is in its lifecycle.
@@ -125,6 +128,8 @@ pub enum SessionEvent {
     },
     /// Part of the framebuffer changed.
     Damaged(Rect),
+    /// The server renamed its desktop.
+    Renamed(String),
     /// The framebuffer was resized.
     Resized {
         /// New width.
@@ -163,6 +168,10 @@ pub struct Session {
     encrypted: bool,
     presented_identity: Option<(IdentityKind, Fingerprint)>,
     last_clipboard: Option<String>,
+    /// The server pushes updates without being asked (continuous updates).
+    continuous: bool,
+    /// The server announced continuous updates (only the first time counts).
+    continuous_offered: bool,
     /// Bytes that arrived over TLS while the user was still checking the
     /// server's identity. They are protected, but the connection hasn't been
     /// told about the upgrade yet, so they wait here until it has.
@@ -192,6 +201,8 @@ impl Session {
             presented_identity: None,
             last_clipboard: None,
             held_after_upgrade: Vec::new(),
+            continuous: false,
+            continuous_offered: false,
         }
     }
 
@@ -470,10 +481,41 @@ impl Session {
                         identity: self.presented_identity,
                     });
                 }
-                ClientEvent::Rect(header) => events.push(self.on_rect(&header)),
+                ClientEvent::Rect(header) => {
+                    let event = self.on_rect(&header);
+                    if matches!(event, SessionEvent::Resized { .. }) && self.continuous {
+                        self.enable_continuous()?;
+                    }
+                    events.push(event);
+                }
                 ClientEvent::UpdateComplete => {
-                    self.request_update(true)?;
+                    // In continuous mode the server sends updates unasked.
+                    if !self.continuous {
+                        self.request_update(true)?;
+                    }
                     events.push(SessionEvent::UpdateComplete);
+                }
+                ClientEvent::ContinuousUpdatesEnded => {
+                    if !self.continuous_offered {
+                        // The first one announces support: switch over once.
+                        self.continuous_offered = true;
+                        self.continuous = true;
+                        self.enable_continuous()?;
+                    } else if self.continuous {
+                        // The server stopped them: go back to asking, for good.
+                        self.continuous = false;
+                        self.request_update(true)?;
+                    }
+                }
+                ClientEvent::Fence { flags, payload } => {
+                    if flags & fence::REQUEST != 0 {
+                        // Everything before it has been handled: answer.
+                        // Messages are handled in order, so BlockBefore is
+                        // always honoured; nothing else is claimed.
+                        let flags = flags & fence::BLOCK_BEFORE;
+                        self.connection
+                            .send(&ClientMessage::Fence { flags, payload })?;
+                    }
                 }
                 ClientEvent::ColourMap { first, colours } => {
                     self.decoder.set_colour_map(first, &colours);
@@ -610,8 +652,24 @@ impl Session {
                 }
             }
             Encoding::Cursor | Encoding::CursorWithAlpha => SessionEvent::CursorChanged,
+            Encoding::DesktopName => {
+                SessionEvent::Renamed(self.decoder.take_name().unwrap_or_default())
+            }
             _ => SessionEvent::Damaged(header.rect),
         }
+    }
+
+    /// Whether the server pushes updates unasked (continuous updates).
+    #[must_use]
+    pub fn continuous_updates(&self) -> bool {
+        self.continuous
+    }
+
+    fn enable_continuous(&mut self) -> Result<(), ProtocolError> {
+        let fb = self.decoder.framebuffer();
+        let rect = Rect::new(0, 0, fb.width(), fb.height());
+        self.connection
+            .send(&ClientMessage::EnableContinuousUpdates { enable: true, rect })
     }
 
     fn request_update(&mut self, incremental: bool) -> Result<(), ProtocolError> {
@@ -630,11 +688,17 @@ impl Session {
             Encoding::Raw,
             Encoding::ExtendedDesktopSize,
             Encoding::DesktopSize,
+            Encoding::Rre,
             Encoding::LastRect,
             Encoding::CursorWithAlpha,
             Encoding::Cursor,
+            Encoding::DesktopName,
+            Encoding::ContinuousUpdates,
+            Encoding::Fence,
         ];
-        list.push(Encoding::JpegQuality(self.config.quality.unwrap_or(8)));
+        if !self.config.no_jpeg {
+            list.push(Encoding::JpegQuality(self.config.quality.unwrap_or(8)));
+        }
         list.push(Encoding::CompressLevel(self.config.compress.unwrap_or(2)));
         list
     }

@@ -18,7 +18,7 @@ dependencies. Milestones are scope, not dates.
 | M5 X11 agent | ✅ Done |
 | M6 Multi-session viewer, tray, advertising | ✅ Done (hand check pending) |
 | M7 Persistent headless desktops | ✅ Done |
-| M8 Performance and full encodings | ⬜ Not started |
+| M8 Performance and full encodings | ✅ Done |
 | M9 Compatibility and polish | ⬜ Not started |
 | M10 GPU paths and H.264 | ⬜ Not started |
 
@@ -114,11 +114,14 @@ SRV-1, SRV-5, VWR-4, NET-8 (shared)
   explicit shared-input policy (U-9) ✓
 - ⚠️ X11 apps need Xwayland 23.1+ (P-36). Not yet used by hand on a real desktop.
 
-## M8: Performance and full encodings ⬜ Not started · [council](../council/2026-10-23-initial-roadmap.md#m8-performance--encodings)
+## M8: Performance and full encodings ✅ Done · [council](../council/2026-10-23-initial-roadmap.md#m8-performance--encodings) · [baselines](../performance/baselines.md)
 ENC-3, ENC-4, ENC-6, ENC-7, ENC-9, ENC-10, ENC-11, NET-7, SRV-6, PLT-4
-- [ ] Server encoders for the full set · auto-selection · quality/compression controls
-- [ ] ContinuousUpdates, Fence, congestion control · remaining pseudo-encodings
-- [ ] **Conditions:** `criterion` benchmarks and published latency/fps baselines · zlib-bomb limits
+- [x] Server encoders for the full set: Raw, RRE, Hextile, ZRLE, Tight with JPEG (the viewer decodes RRE too) (P-42)
+- [x] Auto-selection per rectangle (solid → fill, photo → JPEG, else lossless) · JPEG quality and compression levels honoured · viewer `-NoJPEG` (P-43)
+- [x] ContinuousUpdates and Fence on both sides · congestion control: at most two unacknowledged updates (P-44)
+- [x] Remaining pseudo-encodings: DesktopName (QEMU keys and LED state are M9, P-45)
+- [x] **Conditions:** `criterion` benchmarks, [published baselines](../performance/baselines.md), benchmarks attached to every release ✓ ·
+  zlib-bomb limits (bounded inflate since M2, fuzzed) ✓
 
 ## M9: Compatibility and polish ⬜ Not started · [council](../council/2026-10-23-initial-roadmap.md#m9-compatibility--polish)
 PLT-3, INP-3, INP-4, VWR-7, VWR-11, UTL-2, UTL-3, UTL-4

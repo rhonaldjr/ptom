@@ -79,6 +79,17 @@ pub enum ClientEvent {
     },
     /// Ring the bell.
     Bell,
+    /// Continuous updates stopped, or (the first time) the server says it
+    /// supports them.
+    ContinuousUpdatesEnded,
+    /// The server sent a fence; answer requests with
+    /// [`crate::ClientMessage::Fence`] (Request flag cleared, same payload).
+    Fence {
+        /// [`crate::messages::fence`] flags.
+        flags: u32,
+        /// Bytes to echo back.
+        payload: Vec<u8>,
+    },
     /// Clipboard text from the server (Latin-1).
     ServerCutText(Vec<u8>),
     /// Clipboard text over the size limit was discarded.
@@ -501,6 +512,8 @@ impl ClientConnection {
                 ClientEvent::ColourMap { first, colours }
             }
             ServerMessage::Bell => ClientEvent::Bell,
+            ServerMessage::EndOfContinuousUpdates => ClientEvent::ContinuousUpdatesEnded,
+            ServerMessage::Fence { flags, payload } => ClientEvent::Fence { flags, payload },
             ServerMessage::ServerCutText(CutText::Text(text)) => ClientEvent::ServerCutText(text),
             ServerMessage::ServerCutText(CutText::Oversized { len }) => {
                 self.phase = Phase::Normal(Normal::Skipping(len as usize));

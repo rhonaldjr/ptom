@@ -105,6 +105,8 @@ fn expected(fb: &Framebuffer, rect: Rect, format: PixelFormat) -> Vec<u32> {
 #[derive(Debug, Clone, Copy)]
 enum Codec {
     Raw,
+    Rre,
+    Hextile,
     Zrle,
     Tight,
 }
@@ -126,6 +128,11 @@ fn check_round_trip(
         }
         let (encoding, payload) = match codec {
             Codec::Raw => (Encoding::Raw, encode::raw(fb, rect, &conv).unwrap()),
+            Codec::Rre => (
+                Encoding::Rre,
+                encode::rre(fb, rect, &conv, usize::MAX).unwrap().unwrap(),
+            ),
+            Codec::Hextile => (Encoding::Hextile, encode::hextile(fb, rect, &conv).unwrap()),
             Codec::Zrle => (Encoding::Zrle, zrle.encode(fb, rect, &conv).unwrap()),
             Codec::Tight => (Encoding::Tight, tight.encode(fb, rect, &conv).unwrap()),
         };
@@ -168,6 +175,22 @@ proptest! {
         level in 0u8..=9,
     ) {
         check_round_trip(Codec::Tight, &fb, &rects, format, level)?;
+    }
+
+    #[test]
+    fn rre_round_trips(
+        (fb, rects) in framebuffers().prop_flat_map(|fb| { let r = rects_in(fb.width(), fb.height()); (Just(fb), r) }),
+        format in formats(),
+    ) {
+        check_round_trip(Codec::Rre, &fb, &rects, format, 0)?;
+    }
+
+    #[test]
+    fn hextile_round_trips(
+        (fb, rects) in framebuffers().prop_flat_map(|fb| { let r = rects_in(fb.width(), fb.height()); (Just(fb), r) }),
+        format in formats(),
+    ) {
+        check_round_trip(Codec::Hextile, &fb, &rects, format, 0)?;
     }
 
     #[test]
@@ -248,4 +271,111 @@ fn cursor_rejects_bad_shapes() {
     assert!(Cursor::from_rgba(257, 1, (0, 0), vec![0; 257 * 4]).is_none());
     let c = Cursor::from_rgba(2, 2, (9, 9), vec![0; 16]).unwrap();
     assert_eq!(c.hotspot(), (1, 1));
+}
+
+/// A smooth gradient: the kind of area JPEG is for.
+fn photo(w: u16, h: u16) -> Framebuffer {
+    let mut fb = Framebuffer::new(w, h);
+    let width = usize::from(w);
+    fb.write(Rect::new(0, 0, w, h), |i| {
+        let (x, y) = (
+            u32::try_from(i % width).unwrap(),
+            u32::try_from(i / width).unwrap(),
+        );
+        ((x * 3) & 0xff) << 16 | ((y * 3) & 0xff) << 8 | ((x + y) & 0xff)
+    })
+    .unwrap();
+    fb
+}
+
+#[test]
+fn tight_jpeg_decodes_close_to_the_original_and_respects_quality() {
+    let fb = photo(64, 48);
+    let rect = Rect::new(0, 0, 64, 48);
+    let conv = PixelConverter::new(PixelFormat::RGB888);
+    let mut tight = TightEncoder::new(6);
+    let high = tight.encode_jpeg(&fb, rect, &conv, 9).unwrap().unwrap();
+    let low = tight.encode_jpeg(&fb, rect, &conv, 0).unwrap().unwrap();
+    assert!(low.len() < high.len(), "lower quality is smaller");
+    let mut d = Decoder::new(64, 48, PixelFormat::RGB888, Limits::DEFAULT);
+    let header = RectHeader {
+        rect,
+        encoding: Encoding::Tight,
+    };
+    assert_eq!(d.decode_rect(&header, &high), Ok(Some(high.len())));
+    let worst = fb
+        .pixels()
+        .iter()
+        .zip(d.framebuffer().pixels())
+        .flat_map(|(a, b)| {
+            (0..3).map(move |c| ((a >> (c * 8)) & 0xff).abs_diff((b >> (c * 8)) & 0xff))
+        })
+        .max()
+        .unwrap();
+    assert!(
+        worst < 32,
+        "high-quality JPEG stays close (worst channel error {worst})"
+    );
+    // 16-bit clients can't take JPEG.
+    let rgb565 = PixelConverter::new(RGB565_LE);
+    assert!(tight.encode_jpeg(&fb, rect, &rgb565, 9).unwrap().is_none());
+}
+
+#[test]
+fn desktop_names_round_trip_and_are_bounded() {
+    let mut d = Decoder::new(4, 4, PixelFormat::RGB888, Limits::DEFAULT);
+    let header = RectHeader {
+        rect: Rect::new(0, 0, 0, 0),
+        encoding: Encoding::DesktopName,
+    };
+    let payload = encode::desktop_name("alice@büro");
+    assert_eq!(d.decode_rect(&header, &payload[..3]), Ok(None));
+    assert_eq!(d.decode_rect(&header, &payload), Ok(Some(payload.len())));
+    assert_eq!(d.take_name().as_deref(), Some("alice@büro"));
+    assert_eq!(d.take_name(), None);
+    let long = "é".repeat(encode::MAX_DESKTOP_NAME);
+    let cut = encode::desktop_name(&long);
+    assert!(cut.len() <= 4 + encode::MAX_DESKTOP_NAME);
+    let mut oversized = u32::try_from(encode::MAX_DESKTOP_NAME + 1)
+        .unwrap()
+        .to_be_bytes()
+        .to_vec();
+    oversized.extend(vec![b'a'; encode::MAX_DESKTOP_NAME + 1]);
+    assert!(d.decode_rect(&header, &oversized).is_err());
+}
+
+#[test]
+fn rre_refuses_impossible_subrect_counts() {
+    let mut d = Decoder::new(4, 4, PixelFormat::RGB888, Limits::DEFAULT);
+    let header = RectHeader {
+        rect: Rect::new(0, 0, 2, 2),
+        encoding: Encoding::Rre,
+    };
+    let mut payload = 5u32.to_be_bytes().to_vec();
+    payload.extend([0; 4]);
+    assert!(
+        d.decode_rect(&header, &payload).is_err(),
+        "5 subrects in 4 pixels"
+    );
+}
+
+#[test]
+fn rre_refuses_heavily_overlapping_subrects() {
+    // Regression (M8 security review): each 12-byte subrect covering the whole
+    // rectangle would make the viewer repaint it again and again.
+    let mut d = Decoder::new(64, 64, PixelFormat::RGB888, Limits::DEFAULT);
+    let header = RectHeader {
+        rect: Rect::new(0, 0, 64, 64),
+        encoding: Encoding::Rre,
+    };
+    let count = 1000u32;
+    let mut payload = count.to_be_bytes().to_vec();
+    payload.extend([0; 4]);
+    for _ in 0..count {
+        payload.extend([1, 2, 3, 0]);
+        for v in [0u16, 0, 64, 64] {
+            payload.extend(v.to_be_bytes());
+        }
+    }
+    assert!(d.decode_rect(&header, &payload).is_err());
 }

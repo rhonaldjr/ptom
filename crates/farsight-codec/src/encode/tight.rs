@@ -1,8 +1,9 @@
-//! Tight encoder without JPEG (rfbproto "Tight Encoding"): solid fill, the
-//! palette filter for up to 16 colours (1-bit packing for two), and basic
-//! compression with the copy filter, over four persistent zlib streams.
+//! Tight encoder (rfbproto "Tight Encoding"): solid fill, the palette filter
+//! for up to 16 colours (1-bit packing for two), basic compression with the
+//! copy filter over four persistent zlib streams, and JPEG for photo-like
+//! areas when the client asked for a JPEG quality.
 
-use farsight_rfb::{DecodeError, Rect};
+use farsight_rfb::{DecodeError, PixelFormat, Rect};
 
 use super::palette::Palette;
 use crate::compact::CompactPixel;
@@ -23,6 +24,9 @@ const MAX_COMPACT_LENGTH: usize = 0x3f_ffff;
 const MAX_PALETTE: usize = 16;
 
 const CONTROL_FILL: u8 = 0x80;
+const CONTROL_JPEG: u8 = 0x90;
+/// JPEG quality (percent) for each client quality level 0–9.
+const JPEG_QUALITY: [u8; 10] = [15, 25, 35, 45, 55, 65, 75, 82, 90, 95];
 /// "Read a filter id" flag in the compression-control high nibble.
 const EXPLICIT_FILTER: u8 = 0x4;
 const FILTER_PALETTE: u8 = 1;
@@ -122,6 +126,43 @@ impl TightEncoder {
         Ok(out)
     }
 
+    /// Encodes `rect` as a Tight JPEG rectangle at client quality `level`
+    /// (0–9). Returns `None` when the client's pixel format can't take
+    /// JPEG (it must be true colour with 8 bits per channel).
+    ///
+    /// # Errors
+    /// As for [`Self::encode`].
+    pub fn encode_jpeg(
+        &mut self,
+        framebuffer: &Framebuffer,
+        rect: Rect,
+        converter: &PixelConverter,
+        level: u8,
+    ) -> Result<Option<Vec<u8>>, DecodeError> {
+        framebuffer.check(rect)?;
+        check_limits(rect)?;
+        if !jpeg_capable(converter.format()) {
+            return Ok(None);
+        }
+        let mut rgb = Vec::with_capacity(rect.area() * 3);
+        for pixel in framebuffer.read(rect)? {
+            let [_, r, g, b] = pixel.to_be_bytes();
+            rgb.extend_from_slice(&[r, g, b]);
+        }
+        let quality = JPEG_QUALITY
+            .get(usize::from(level))
+            .copied()
+            .unwrap_or(JPEG_QUALITY[9]);
+        let mut jpeg = Vec::new();
+        jpeg_encoder::Encoder::new(&mut jpeg, quality)
+            .encode(&rgb, rect.width, rect.height, jpeg_encoder::ColorType::Rgb)
+            .map_err(|_| DecodeError::Malformed("JPEG encoding failed"))?;
+        let mut out = vec![CONTROL_JPEG | self.take_resets()];
+        put_compact_length(&mut out, jpeg.len())?;
+        out.extend_from_slice(&jpeg);
+        Ok(Some(out))
+    }
+
     /// Reset bits for every stream restarted since it was last used. Fill
     /// rectangles carry them too, so pending resets go out early.
     fn take_resets(&mut self) -> u8 {
@@ -162,6 +203,15 @@ impl TightEncoder {
         out.extend_from_slice(&compressed);
         Ok(())
     }
+}
+
+/// Whether a client in `format` can take Tight JPEG: true colour, 32 bits
+/// a pixel, 8 bits per channel (rfbproto "Tight Encoding").
+#[must_use]
+pub fn jpeg_capable(format: PixelFormat) -> bool {
+    format.true_colour
+        && format.bits_per_pixel == 32
+        && [format.red_max, format.green_max, format.blue_max] == [255, 255, 255]
 }
 
 fn check_limits(rect: Rect) -> Result<(), DecodeError> {

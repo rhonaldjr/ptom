@@ -21,7 +21,10 @@ integrity · viewer host integrity · the local user's awareness that they are b
 | Marvin timing attack on RSA decryption (RA2) | aws-lc-rs constant-time PKCS#1 v1.5, not the `rsa` crate (ADR-0016) | M3 ✅ |
 | Credential theft from disk | XChaCha20-Poly1305 vault with the key in the OS keyring; agent passwords stored as Argon2id hashes; `~/.vnc/passwd` never written (ADR-0008, ADR-0014) | M3 ✅ |
 | Fingerprint fatigue (users click through changed-key warnings) | A changed identity needs an explicit extra acknowledgement; Disconnect is the default | M3 ✅ |
-| API4 resource exhaustion (cut text, encodings count, zlib bombs) | Bounded decoders · fuzzing | M1, M8 |
+| API4 resource exhaustion (cut text, encodings count, zlib bombs) | Bounded decoders and inflate output · fence payloads ≤ 64 bytes · RRE subrect count ≤ area and checked against the bytes present · desktop names ≤ 1 KiB · fuzzing | M1, M8 ✅ |
+| A viewer floods the agent's output (continuous updates) | Memory is bounded by TCP backpressure (each write is awaited); the two-update window (only replies to fences actually sent count) keeps latency low; fences only after negotiation | M8 ✅ |
+| **Accepted risk:** a server renames its desktop to look like another tab | Names sanitised; empty names fall back to the address ([M8 review](../reviews/2026-10-24-m8-review.md)) | M8 |
+| Malicious server stalls the viewer with overlapping RRE subrects (API4) | Total subrect area capped at twice the rectangle ([review](../reviews/2026-10-24-m8-review.md)) | M8 ✅ |
 | API3 view-only client sends input | Enforced by `ServerSession` (tested) | M4 ✅ |
 | API10 malicious server → viewer RCE/DoS | Memory-safe decoders · fuzzing · bounds checks | M2 |
 | T1046 discovery recon / rogue-agent spoofing | Minimal TXT · unverified-until-fingerprint · agent announces only on user-trusted networks (ADR-0019) | M6 ✅ |

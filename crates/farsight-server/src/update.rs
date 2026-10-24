@@ -4,6 +4,7 @@
 
 use farsight_codec::encode::{self, TIGHT_MAX_AREA, TightEncoder, ZrleEncoder};
 use farsight_codec::{Cursor, PixelConverter};
+use farsight_rfb::messages::fence;
 use farsight_rfb::server::ServerConnection;
 use farsight_rfb::{
     DecodeError, Encoding, PixelFormat, ProtocolError, Rect, RectHeader, ServerMessage,
@@ -12,6 +13,7 @@ use farsight_rfb::{
 use crate::Desktop;
 use crate::damage::{self, Region};
 use crate::desktop::Changes;
+use crate::select::{self, Choice, Content, Offer};
 
 /// Largest side of one encoded rectangle. 256 × 256 is Tight's area limit
 /// and keeps the work per rectangle bounded for every encoding.
@@ -20,6 +22,14 @@ pub(crate) const PIECE: u16 = 256;
 pub(crate) const MAX_PIECES: usize = 1024;
 /// Compression level when the viewer does not ask for one.
 const DEFAULT_COMPRESS_LEVEL: u8 = 2;
+
+/// Updates sent in continuous mode before the viewer must acknowledge one
+/// (through a fence): the congestion window.
+const MAX_IN_FLIGHT: u8 = 2;
+/// Marks fences the agent sent, so their replies can be told apart.
+const FENCE_TAG: [u8; 4] = *b"FSGT";
+/// RRE is used only while it needs fewer subrectangles than area / this.
+const RRE_DENSITY: usize = 16;
 
 /// `ExtendedDesktopSize` reasons (rectangle x-position).
 const REASON_SERVER: u16 = 0;
@@ -34,6 +44,9 @@ struct Capabilities {
     cursor_with_alpha: bool,
     desktop_size: bool,
     extended_desktop_size: bool,
+    desktop_name: bool,
+    fence: bool,
+    continuous_updates: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +59,23 @@ struct Request {
 #[allow(clippy::struct_excessive_bools)] // Independent pending-work flags.
 pub(crate) struct UpdateState {
     allowed: Vec<Encoding>,
+    /// Encodings both sides support, the agent's preference first.
+    usable: Vec<Encoding>,
+    jpeg_quality: Option<u8>,
+    /// Continuous updates (rfbproto): the area kept up to date, if on.
+    continuous: Option<Rect>,
+    /// Updates sent in continuous mode that the viewer hasn't acknowledged.
+    in_flight: u8,
+    fence_seq: u32,
+    /// Sequence numbers of the agent's fences still waiting for a reply.
+    outstanding: Vec<u32>,
+    /// Fence replies owed to the viewer (sent before anything else).
+    fence_replies: Vec<(u32, Vec<u8>)>,
+    /// Tell the viewer continuous updates are available (once).
+    announce_continuous: bool,
+    continuous_ended: bool,
+    name_serial: u64,
+    name_dirty: bool,
     converter: PixelConverter,
     encoding: Encoding,
     caps: Capabilities,
@@ -72,6 +102,17 @@ impl UpdateState {
         let fb = desktop.framebuffer();
         Self {
             allowed,
+            usable: vec![Encoding::Raw],
+            jpeg_quality: None,
+            continuous: None,
+            in_flight: 0,
+            fence_seq: 0,
+            outstanding: Vec::new(),
+            fence_replies: Vec::new(),
+            announce_continuous: false,
+            continuous_ended: false,
+            name_serial: desktop.name_serial(),
+            name_dirty: false,
             converter: PixelConverter::new(PixelFormat::RGB888),
             encoding: Encoding::Raw,
             caps: Capabilities::default(),
@@ -147,20 +188,43 @@ impl UpdateState {
     /// encodings that the viewer accepts (Raw otherwise) and notes the
     /// pseudo-encodings and levels.
     pub(crate) fn set_encodings(&mut self, list: &[Encoding]) {
-        self.encoding = self
+        self.usable = self
             .allowed
             .iter()
             .copied()
-            .find(|e| list.contains(e))
-            .unwrap_or(Encoding::Raw);
+            .filter(|e| list.contains(e))
+            .collect();
+        if !self.usable.contains(&Encoding::Raw) {
+            self.usable.push(Encoding::Raw);
+        }
+        self.encoding = self.usable.first().copied().unwrap_or(Encoding::Raw);
+        self.jpeg_quality = list.iter().find_map(|e| match e {
+            Encoding::JpegQuality(level) => Some(*level),
+            _ => None,
+        });
         let had_layout = self.caps.extended_desktop_size;
         let had_cursor = self.caps.cursor || self.caps.cursor_with_alpha;
+        let had_continuous = self.caps.continuous_updates && self.caps.fence;
         self.caps = Capabilities {
             cursor: list.contains(&Encoding::Cursor),
             cursor_with_alpha: list.contains(&Encoding::CursorWithAlpha),
             desktop_size: list.contains(&Encoding::DesktopSize),
             extended_desktop_size: list.contains(&Encoding::ExtendedDesktopSize),
+            desktop_name: list.contains(&Encoding::DesktopName),
+            fence: list.contains(&Encoding::Fence),
+            continuous_updates: list.contains(&Encoding::ContinuousUpdates),
         };
+        // Continuous updates need fences for flow control; announce them
+        // (an unprompted EndOfContinuousUpdates) when both are understood.
+        let continuous_now = self.caps.continuous_updates && self.caps.fence;
+        if continuous_now && !had_continuous {
+            self.announce_continuous = true;
+        }
+        // The viewer dropped them: stop, so no unknown messages follow.
+        if !continuous_now && self.continuous.take().is_some() {
+            self.outstanding.clear();
+            self.in_flight = 0;
+        }
         if self.caps.extended_desktop_size && !had_layout {
             self.announce_layout = true;
         }
@@ -199,6 +263,41 @@ impl UpdateState {
         });
     }
 
+    /// Applies `EnableContinuousUpdates`. Ignored unless the viewer also
+    /// negotiated fences (the agent needs its acknowledgements).
+    pub(crate) fn enable_continuous(&mut self, enable: bool, area: Rect) {
+        if !(self.caps.continuous_updates && self.caps.fence) {
+            return;
+        }
+        if enable {
+            self.continuous = Some(area);
+        } else {
+            // Always confirmed, even if they were already off (rfbproto).
+            self.continuous = None;
+            self.continuous_ended = true;
+            self.in_flight = 0;
+            self.outstanding.clear();
+        }
+    }
+
+    /// Handles a viewer's fence: requests are answered (in order, before any
+    /// later update); replies to the agent's own fences open the window.
+    pub(crate) fn fence(&mut self, flags: u32, payload: Vec<u8>) {
+        if !self.caps.fence {
+            return;
+        }
+        if flags & fence::REQUEST != 0 {
+            self.fence_replies
+                .push((flags & fence::BLOCK_BEFORE, payload));
+        } else if let Some(seq) = our_fence(&payload)
+            && let Some(index) = self.outstanding.iter().position(|&s| s == seq)
+        {
+            // Only a reply to a fence actually sent opens the window.
+            self.outstanding.swap_remove(index);
+            self.in_flight = self.in_flight.saturating_sub(1);
+        }
+    }
+
     /// Queues the reply to a `SetDesktopSize` request.
     pub(crate) fn reply_to_resize(&mut self, status: u16) {
         self.resize_reply = Some(status);
@@ -224,6 +323,10 @@ impl UpdateState {
             self.cursor_serial = desktop.cursor_serial();
             self.cursor_dirty = true;
         }
+        if desktop.name_serial() != self.name_serial {
+            self.name_serial = desktop.name_serial();
+            self.name_dirty = true;
+        }
     }
 
     fn can_resize(&self) -> bool {
@@ -244,9 +347,21 @@ impl UpdateState {
         )
     }
 
+    /// The request to answer: the viewer's, or (in continuous mode, while
+    /// the congestion window has room) a standing incremental one.
+    fn effective_request(&self) -> Option<Request> {
+        self.request.or_else(|| {
+            let area = self.continuous?;
+            (self.in_flight < MAX_IN_FLIGHT).then_some(Request {
+                incremental: true,
+                area,
+            })
+        })
+    }
+
     /// Whether an update should be sent now.
     fn ready(&self, desktop: &Desktop) -> bool {
-        let Some(request) = self.request else {
+        let Some(request) = self.effective_request() else {
             return false;
         };
         let fb = desktop.framebuffer();
@@ -257,6 +372,7 @@ impl UpdateState {
             || self.resize_reply.is_some()
             || (self.announce_layout && self.caps.extended_desktop_size)
             || (self.cursor_dirty && self.sends_cursor())
+            || (self.name_dirty && self.caps.desktop_name)
             || damage::intersect(request.area, self.bounds(desktop))
                 .is_some_and(|area| !self.damage.within(area).is_empty())
     }
@@ -268,12 +384,21 @@ impl UpdateState {
         desktop: &Desktop,
         connection: &mut ServerConnection,
     ) -> Result<(), ProtocolError> {
+        for (flags, payload) in std::mem::take(&mut self.fence_replies) {
+            connection.send(&ServerMessage::Fence { flags, payload })?;
+        }
+        if std::mem::take(&mut self.announce_continuous)
+            || std::mem::take(&mut self.continuous_ended)
+        {
+            connection.send(&ServerMessage::EndOfContinuousUpdates)?;
+        }
         if !self.ready(desktop) {
             return Ok(());
         }
-        let Some(request) = self.request.take() else {
+        let Some(request) = self.request.take().or_else(|| self.effective_request()) else {
             return Ok(());
         };
+        let continuous = self.continuous.is_some();
         let (mut rects, resized) = self.pseudo_rects(desktop);
         let bounds = self.bounds(desktop);
         let mut areas = Region::new(self.max_rects);
@@ -320,6 +445,18 @@ impl UpdateState {
         for (header, payload) in &rects {
             connection.send_rect(header, payload)?;
         }
+        if continuous {
+            // The reply to this fence says the viewer has the update.
+            self.fence_seq = self.fence_seq.wrapping_add(1);
+            let mut payload = FENCE_TAG.to_vec();
+            payload.extend_from_slice(&self.fence_seq.to_be_bytes());
+            connection.send(&ServerMessage::Fence {
+                flags: fence::REQUEST | fence::BLOCK_BEFORE,
+                payload,
+            })?;
+            self.outstanding.push(self.fence_seq);
+            self.in_flight = self.in_flight.saturating_add(1);
+        }
         Ok(())
     }
 
@@ -353,6 +490,15 @@ impl UpdateState {
         if self.cursor_dirty && self.sends_cursor() {
             self.cursor_dirty = false;
             rects.push(self.cursor_rect(desktop.cursor()));
+        }
+        if std::mem::take(&mut self.name_dirty) && self.caps.desktop_name {
+            rects.push((
+                RectHeader {
+                    rect: Rect::default(),
+                    encoding: Encoding::DesktopName,
+                },
+                encode::desktop_name(desktop.name()),
+            ));
         }
         (rects, before != self.client_size)
     }
@@ -418,7 +564,30 @@ impl UpdateState {
     ) -> Result<(Encoding, Vec<u8>), DecodeError> {
         let fb = desktop.framebuffer();
         let level = self.compress_level;
-        match self.encoding {
+        // With only one usable encoding there's nothing to choose.
+        let content = if self.usable.len() > 1 {
+            select::analyse(&fb.read(rect)?)
+        } else {
+            Content::Flat
+        };
+        let offer = Offer {
+            usable: &self.usable,
+            jpeg_quality: self.jpeg_quality,
+            jpeg_capable: encode::jpeg_capable(self.converter.format()),
+        };
+        let encoding = match select::choose(content, rect.area(), offer) {
+            Choice::TightJpeg(quality) if rect.area() <= TIGHT_MAX_AREA => {
+                let tight = self.tight.get_or_insert_with(|| TightEncoder::new(level));
+                if let Some(payload) = tight.encode_jpeg(fb, rect, &self.converter, quality)? {
+                    return Ok((Encoding::Tight, payload));
+                }
+                Encoding::Tight
+            }
+            // Too big for one Tight rectangle (pieces are sized so this can't happen).
+            Choice::TightJpeg(_) => self.encoding,
+            Choice::Lossless(encoding) => encoding,
+        };
+        match encoding {
             Encoding::Tight if rect.area() <= TIGHT_MAX_AREA => Ok((
                 Encoding::Tight,
                 self.tight
@@ -431,9 +600,30 @@ impl UpdateState {
                     .get_or_insert_with(|| ZrleEncoder::new(level))
                     .encode(fb, rect, &self.converter)?,
             )),
+            Encoding::Rre => {
+                let budget = (rect.area() / RRE_DENSITY).max(1);
+                match encode::rre(fb, rect, &self.converter, budget)? {
+                    Some(payload) => Ok((Encoding::Rre, payload)),
+                    None if self.usable.contains(&Encoding::Hextile) => Ok((
+                        Encoding::Hextile,
+                        encode::hextile(fb, rect, &self.converter)?,
+                    )),
+                    None => Ok((Encoding::Raw, encode::raw(fb, rect, &self.converter)?)),
+                }
+            }
+            Encoding::Hextile => Ok((
+                Encoding::Hextile,
+                encode::hextile(fb, rect, &self.converter)?,
+            )),
             _ => Ok((Encoding::Raw, encode::raw(fb, rect, &self.converter)?)),
         }
     }
+}
+
+/// The sequence number in a fence payload the agent made (tag + seq).
+fn our_fence(payload: &[u8]) -> Option<u32> {
+    let seq = payload.strip_prefix(&FENCE_TAG)?;
+    Some(u32::from_be_bytes(seq.try_into().ok()?))
 }
 
 /// The fixed colour map for colour-map viewers: index bits `bbgggrrr`.

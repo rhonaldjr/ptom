@@ -63,6 +63,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rustix = { version = "1", features = ["process"] }
 # Headless compositor (ADR-0006): software rendering only (pixman), no GPU, DRM or libinput.
 smithay = { version = "0.7", default-features = false, features = ["desktop", "renderer_pixman", "wayland_frontend", "xwayland"] }
+# Tight JPEG encoding (pure Rust; IJG-derived, see README credits).
+jpeg-encoder = { version = "0.7", default-features = false, features = ["std"] }
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 # systemd socket activation for headless desktops (M7).
 listenfd = "1"
 # Pure-Rust X11 protocol (no Xlib, no libxcb); used by farsight-capture-x11.

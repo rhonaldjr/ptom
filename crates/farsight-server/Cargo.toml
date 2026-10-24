@@ -16,8 +16,13 @@ secrecy.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 farsight-client.workspace = true
 proptest.workspace = true
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "pipeline"
+harness = false

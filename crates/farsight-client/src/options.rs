@@ -38,6 +38,8 @@ pub struct ViewerOptions {
     pub quality: Option<u8>,
     /// Compression level 0–9.
     pub compress: Option<u8>,
+    /// Never use lossy JPEG.
+    pub no_jpeg: bool,
     /// Allow unencrypted, legacy security without asking (Farsight extension).
     pub allow_insecure: bool,
     /// Legacy `vncpasswd` file to read the password from (read-only, ADR-0014).
@@ -57,6 +59,7 @@ impl Default for ViewerOptions {
             shared: true,
             quality: None,
             compress: None,
+            no_jpeg: false,
             allow_insecure: false,
             password_file: None,
             menu_key: "F8".into(),
@@ -100,6 +103,7 @@ Options (TigerVNC-compatible; case-insensitive; -Name value or -Name=value):
   -Shared=0             Ask the server to disconnect other viewers
   -QualityLevel N       JPEG quality 0-9
   -CompressLevel N      Compression level 0-9
+  -NoJPEG               Never use lossy JPEG (exact pixels, more bandwidth)
   -PasswordFile FILE    Read the password from a vncpasswd file (alias -passwd)
   -MenuKey KEY          Key that opens the viewer menu (default F8)
   -RemoteResize=0       Don't resize the remote desktop to fit the window
@@ -136,6 +140,7 @@ impl Command {
                 "shared" => options.shared = boolean(&name, inline.as_deref())?,
                 "remoteresize" => options.remote_resize = boolean(&name, inline.as_deref())?,
                 "allowinsecure" => options.allow_insecure = boolean(&name, inline.as_deref())?,
+                "nojpeg" => options.no_jpeg = boolean(&name, inline.as_deref())?,
                 "qualitylevel" => {
                     options.quality = Some(level(&name, &value(&name, inline, &mut args)?)?);
                 }
