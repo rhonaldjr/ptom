@@ -17,6 +17,7 @@ farsight-rfb = { path = "../crates/farsight-rfb" }
 farsight-security = { path = "../crates/farsight-security" }
 farsight-codec = { path = "../crates/farsight-codec" }
 farsight-discovery = { path = "../crates/farsight-discovery" }
+farsight-server = { path = "../crates/farsight-server" }
 secrecy = "0.10"
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 
@@ -114,6 +115,20 @@ bench = false
 [[bin]]
 name = "probe_handshake"
 path = "fuzz_targets/probe_handshake.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "server_session"
+path = "fuzz_targets/server_session.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "codec_encode"
+path = "fuzz_targets/codec_encode.rs"
 test = false
 doc = false
 bench = false

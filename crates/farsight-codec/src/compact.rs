@@ -110,6 +110,33 @@ impl<'a> CompactPixel<'a> {
     }
 }
 
+impl CompactPixel<'_> {
+    /// Appends the compact form of the raw pixel value `raw` (as produced by
+    /// [`PixelConverter::to_raw`]); the inverse of [`Self::rgb`].
+    pub(crate) fn write(&self, raw: u32, out: &mut Vec<u8>) {
+        let f = self.converter.format();
+        let three = |value: u32, out: &mut Vec<u8>| {
+            let [b0, b1, b2, _] = value.to_le_bytes();
+            if f.big_endian {
+                out.extend([b2, b1, b0]);
+            } else {
+                out.extend([b0, b1, b2]);
+            }
+        };
+        match self.layout {
+            Layout::Pixel => self.converter.write_raw(raw, out),
+            Layout::Rgb => {
+                let byte = |shift: u8| -> u8 {
+                    u8::try_from(raw.checked_shr(u32::from(shift)).unwrap_or(0) & 0xff).unwrap_or(0)
+                };
+                out.extend([byte(f.red_shift), byte(f.green_shift), byte(f.blue_shift)]);
+            }
+            Layout::Low3 => three(raw, out),
+            Layout::High3 => three(raw >> 8, out),
+        }
+    }
+}
+
 /// All bits used by the red, green and blue channels, or `None` if a shift
 /// puts a channel outside 64 bits.
 fn colour_mask(f: &PixelFormat) -> Option<u64> {

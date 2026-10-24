@@ -1,0 +1,20 @@
+[package]
+name = "farsight-desktop"
+description = "Desktop integration: notifications, access prompts and tray icons"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+tokio.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni.workspace = true
+notify-rust.workspace = true
+
+[lints]
+workspace = true

@@ -93,6 +93,13 @@ impl PixelConverter {
     /// Converts `0x00RRGGBB` to the wire format (true-colour formats only)
     /// and appends it to `out`.
     pub fn encode(&self, rgb: u32, out: &mut Vec<u8>) {
+        self.write_raw(self.to_raw(rgb), out);
+    }
+
+    /// Converts `0x00RRGGBB` to a raw pixel value in the wire format
+    /// (true-colour formats only), before byte ordering.
+    #[must_use]
+    pub fn to_raw(&self, rgb: u32) -> u32 {
         let f = &self.format;
         let channel = |value: u32, max: u16, shift: u8| -> u32 {
             let max = u32::from(max);
@@ -100,12 +107,17 @@ impl PixelConverter {
                 .checked_shl(u32::from(shift))
                 .unwrap_or(0)
         };
-        let raw = channel((rgb >> 16) & 0xff, f.red_max, f.red_shift)
+        channel((rgb >> 16) & 0xff, f.red_max, f.red_shift)
             | channel((rgb >> 8) & 0xff, f.green_max, f.green_shift)
-            | channel(rgb & 0xff, f.blue_max, f.blue_shift);
+            | channel(rgb & 0xff, f.blue_max, f.blue_shift)
+    }
+
+    /// Appends a raw pixel value as [`Self::bytes_per_pixel`] bytes in the
+    /// format's byte order.
+    pub fn write_raw(&self, raw: u32, out: &mut Vec<u8>) {
         let bytes = raw.to_le_bytes();
         let pixel = bytes.get(..self.bytes_per_pixel).unwrap_or_default();
-        if f.big_endian {
+        if self.format.big_endian {
             out.extend(pixel.iter().rev());
         } else {
             out.extend_from_slice(pixel);

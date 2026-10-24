@@ -56,14 +56,15 @@ PRD-4, VWR-13, VWR-16, VWR-17
   security list · Q4 interop containers (TigerVNC, x11vnc, QEMU, mDNS advertiser) · advertised servers appear within 5 s,
   and an opted-in /24 scan finishes within 30 s · scope limited to local subnets, rate-limited · credentials keyed by verified identity
 
-## M4: COSMIC / Wayland live-session agent · [council](../council/2026-10-23-initial-roadmap.md#m4-cosmic--wayland-agent)
+## M4: COSMIC / Wayland live-session agent ☑ · [council](../council/2026-10-23-initial-roadmap.md#m4-cosmic--wayland-agent) · [ADR-0018](../adr/0018-agent-architecture.md)
 SRV-3, SRV-4, SRV-7, SRV-8, SRV-9, SRV-10, SRV-12, SEC-10, NET-2, NET-8 (view-only), ENC-1/2/5/6 (encode)
-- `farsight-agent --backend wayland`: portal ScreenCast/RemoteDesktop with PipeWire and libei. Targets COSMIC first, then GNOME and KDE.
-- systemd user unit with ADR-0009 hardening · loopback-only default · access controls and auth rate limiting
-- Session-presence indicator plus "disconnect all" for the local user
-- **Conditions:** requires M3 (no off-loopback agent without encryption) · use cases tested via
-  fake ports in CI, plus a recorded Q3 exploratory charter on Pop!_OS COSMIC per release until M7
-  provides a CI compositor · view-only enforcement test (API3)
+- ☑ `farsight-agent --backend wayland`: xdg-desktop-portal RemoteDesktop/ScreenCast + PipeWire; approval remembered with a restore token (U-3)
+- ☑ `farsight-server`: per-viewer sessions, shared desktop with damage tracking, Raw/ZRLE/Tight (no JPEG) encoders, access control and lockout
+- ☑ systemd user unit with ADR-0009 hardening, shipped disabled (U-6) · loopback-only default (U-5) · TLS and RA2 identity created on first run
+- ☑ Approval prompt for anyone but the owner (U-2) · presence tray icon and notifications with "Disconnect everyone" (U-4)
+- ☑ **Conditions:** requires M3 ✓ · use cases tested with fake ports in CI ✓ · view-only enforced by the server (test) ✓ ·
+  Q3 charter for live portals: [docs/testing/charters/2026-10-24-wayland-capture.md](../testing/charters/2026-10-24-wayland-capture.md)
+- Not yet verified on a live Wayland desktop (the build machine runs X11). Clipboard over the Wayland portal is still to come.
 
 ## M5: X11 agent (x0vncserver parity) · [council](../council/2026-10-23-initial-roadmap.md#m5-x11-agent)
 SRV-2, SRV-7 (XTest), SRV-10 (XDamage + polling)

@@ -14,3 +14,4 @@
 | [decisions/provisional.md](decisions/provisional.md) | Provisional decisions made during implementation, awaiting user review |
 | [security/threat-model.md](security/threat-model.md) | Threat model and accepted risks |
 | [testing/](testing/README.md) | Test strategy and exploratory charters |
+| [testing/charters/2026-10-24-wayland-capture.md](testing/charters/2026-10-24-wayland-capture.md) | Q3 charter: Wayland portal capture and input on COSMIC, GNOME and KDE |

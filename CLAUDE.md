@@ -24,6 +24,7 @@ and windows, LAN discovery of agents, and an encrypted credential vault.
 | Protocol core | Sans-I/O client/server state machines; pluggable `Authenticator`; transport upgrades done by the caller | [0015](docs/adr/0015-sans-io-connections.md) |
 | RSA-AES crypto | aws-lc-rs for RSA (Marvin-safe), RustCrypto EAX/AES | [0016](docs/adr/0016-ra2-crypto-aws-lc.md) |
 | Server identity | Fingerprint pinning (TOFU), checked before credentials; changed identity needs explicit acknowledgement; downgrade refused | [0017](docs/adr/0017-server-identity-verification.md) |
+| Agent | Server core + capture backends + desktop integration; accept prompt for non-owner logins; loopback default | [0018](docs/adr/0018-agent-architecture.md) |
 | Discovery | mDNS / DNS-SD `_rfb._tcp` | [0010](docs/adr/0010-lan-discovery.md) |
 | Agent credentials | Argon2id user hashes; legacy VncAuth sealed in the keyring-backed vault; never write `~/.vnc/passwd` | [0014](docs/adr/0014-agent-credentials.md) |
 | Discovery of any VNC server | Passive mDNS always on; active probing only on user-marked networks | [0012](docs/adr/0012-active-rfb-probing.md) |

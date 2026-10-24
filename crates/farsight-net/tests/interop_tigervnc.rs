@@ -70,6 +70,12 @@ async fn connects_authenticates_and_decodes_a_red_desktop() {
                 assert_eq!(connected, Some((640, 480)));
                 assert_eq!((frame.width, frame.height), (640, 480));
                 let centre = (240 * 640 + 320) * 4;
+                eprintln!(
+                    "frame {}x{}, centre pixel {:?}",
+                    frame.width,
+                    frame.height,
+                    frame.rgba.get(centre..centre + 4)
+                );
                 if frame.rgba.get(centre..centre + 3) == Some(&[0xff, 0, 0]) {
                     assert!(handle.send(Command::Disconnect));
                     return;

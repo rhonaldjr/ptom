@@ -12,6 +12,12 @@ publish.workspace = true
 farsight-rfb.workspace = true
 farsight-codec.workspace = true
 farsight-security.workspace = true
+secrecy.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+farsight-client.workspace = true
+proptest.workspace = true
 
 [lints]
 workspace = true

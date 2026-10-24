@@ -1,0 +1,35 @@
+# Farsight agent: shares your desktop session (ADR-0009, U-6).
+# Installed as a *user* unit and NOT enabled automatically. To turn it on:
+#   systemctl --user enable --now farsight-agent
+# To allow connections from your network, add `--listen lan` to ExecStart
+# with `systemctl --user edit farsight-agent`.
+[Unit]
+Description=Farsight desktop sharing agent
+Documentation=https://github.com/rhonaldjr/ptom
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/farsight-agent
+Restart=on-failure
+RestartSec=5
+
+# Hardening (ADR-0009). The agent runs as you and needs your session's
+# D-Bus, Wayland/X11 sockets and PipeWire, so home stays readable.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/farsight %h/.local/share/farsight
+# No PrivateTmp: the X11 backend needs /tmp/.X11-unix.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=graphical-session.target

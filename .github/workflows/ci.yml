@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install GUI build libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev && sudo bash ci/install-spa-headers.sh
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -40,7 +40,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install GUI build libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev xvfb && sudo bash ci/install-spa-headers.sh
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features --locked
 

@@ -3,4 +3,4 @@ allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-indexing-slicing-in-tests = true
 # Protocol/product names used in prose, not code identifiers.
-doc-valid-idents = ["VeNCrypt", "VncAuth", "TightVNC", "CopyRect", "RA2_256", "TigerVNC", "RealVNC", "noVNC", ".."]
+doc-valid-idents = ["VeNCrypt", "VncAuth", "TightVNC", "CopyRect", "RA2_256", "TigerVNC", "RealVNC", "noVNC", "XDamage", "XFixes", "XTest", "RandR", "TrueColor", "DirectColor", "PipeWire", "RemoteDesktop", "ScreenCast", ".."]

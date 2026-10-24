@@ -9,6 +9,7 @@ declare -A LAYER=(
   [farsight-rfb]=1 [farsight-codec]=1
   [farsight-security]=2 [farsight-client]=2 [farsight-server]=2
   [farsight-net]=3 [farsight-vault]=3 [farsight-discovery]=3 [farsight-desktop]=3
+  [farsight-capture-x11]=3 [farsight-capture-wayland]=3
   [farsight]=4 [farsight-agent]=4 [farsight-passwd]=4
 )
 FORBIDDEN_IN_CORE='^(tokio|async-std|smol|futures|rustls|tokio-rustls|libcosmic|iced|winit|wgpu|wayland-client|wayland-server|x11rb|smithay|pipewire|ashpd|reis|mdns-sd|keyring|rustix|libc|nix)$'

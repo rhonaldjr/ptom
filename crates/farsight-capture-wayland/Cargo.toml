@@ -1,0 +1,27 @@
+[package]
+name = "farsight-capture-wayland"
+description = "Wayland screen capture and input injection via xdg-desktop-portal and PipeWire"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+farsight-codec.workspace = true
+farsight-rfb.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd.workspace = true
+pipewire.workspace = true
+futures-util.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

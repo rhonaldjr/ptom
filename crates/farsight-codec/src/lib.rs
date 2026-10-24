@@ -1,4 +1,4 @@
-//! Pixel encodings and decoders: Raw, CopyRect, Hextile, ZRLE, Tight (with
+//! Pixel encodings, decoders and (in [`encode`]) the agent's encoders: Raw, CopyRect, Hextile, ZRLE, Tight (with
 //! JPEG), the Cursor, `CursorWithAlpha` and `ExtendedDesktopSize`
 //! pseudo-encodings, and later H.264.
 //!
@@ -16,6 +16,7 @@
 mod compact;
 mod cursor;
 mod decoder;
+mod deflate;
 mod desktop;
 pub mod encode;
 mod framebuffer;
@@ -29,5 +30,6 @@ mod zrle;
 pub use cursor::{Cursor, MAX_CURSOR_SIDE};
 pub use decoder::Decoder;
 pub use desktop::{DesktopResize, ResizeReason, ResizeStatus};
+pub use encode::{TightEncoder, ZrleEncoder};
 pub use framebuffer::Framebuffer;
 pub use pixel::PixelConverter;

@@ -13,25 +13,26 @@ use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
+use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::debug;
 
 enum Link {
     Plain(TcpStream),
     Tls(Box<TlsStream<TcpStream>>),
+    ServerTls(Box<tokio_rustls::server::TlsStream<TcpStream>>),
     Closed,
 }
 
-/// A connection to the server that may be upgraded mid-handshake.
-pub(crate) struct Transport {
+/// A connection that may be upgraded mid-handshake (viewer or agent side).
+pub struct Transport {
     link: Link,
     ra2: Option<Ra2Cipher>,
     framed: Vec<u8>,
 }
 
 /// What the TLS layer learned about the server's certificate.
-pub(crate) struct TlsIdentity {
+pub struct TlsIdentity {
     /// SHA-256 of the leaf certificate.
     pub fingerprint: Fingerprint,
     /// Whether it chains to a trusted CA for the host name.
@@ -39,7 +40,9 @@ pub(crate) struct TlsIdentity {
 }
 
 impl Transport {
-    pub(crate) fn new(stream: TcpStream) -> Self {
+    /// Wraps a connected TCP stream.
+    #[must_use]
+    pub fn new(stream: TcpStream) -> Self {
         Self {
             link: Link::Plain(stream),
             ra2: None,
@@ -49,10 +52,14 @@ impl Transport {
 
     /// Reads and returns plaintext. `Ok(None)` means the peer closed the
     /// connection; an empty vector means a partial RA2 frame arrived.
-    pub(crate) async fn read(&mut self, buf: &mut [u8]) -> std::io::Result<Option<Vec<u8>>> {
+    ///
+    /// # Errors
+    /// I/O errors, or a tampered RA2 frame.
+    pub async fn read(&mut self, buf: &mut [u8]) -> std::io::Result<Option<Vec<u8>>> {
         let n = match &mut self.link {
             Link::Plain(s) => s.read(buf).await?,
             Link::Tls(s) => s.read(buf).await?,
+            Link::ServerTls(s) => s.read(buf).await?,
             Link::Closed => 0,
         };
         if n == 0 {
@@ -77,7 +84,10 @@ impl Transport {
     }
 
     /// Writes plaintext (framed when RA2 is active).
-    pub(crate) async fn write(&mut self, plain: &[u8]) -> std::io::Result<()> {
+    ///
+    /// # Errors
+    /// I/O errors.
+    pub async fn write(&mut self, plain: &[u8]) -> std::io::Result<()> {
         if plain.is_empty() {
             return Ok(());
         }
@@ -96,19 +106,34 @@ impl Transport {
         match &mut self.link {
             Link::Plain(s) => s.write_all(bytes).await,
             Link::Tls(s) => s.write_all(bytes).await,
+            Link::ServerTls(s) => s.write_all(bytes).await,
             Link::Closed => Err(std::io::ErrorKind::NotConnected.into()),
         }
     }
 
     /// Starts RA2 framing for everything sent and received from now on.
-    pub(crate) fn enable_ra2(
-        &mut self,
-        send_key: &[u8],
-        receive_key: &[u8],
-    ) -> std::io::Result<()> {
+    ///
+    /// # Errors
+    /// An invalid key length.
+    pub fn enable_ra2(&mut self, send_key: &[u8], receive_key: &[u8]) -> std::io::Result<()> {
         let cipher =
             Ra2Cipher::new(send_key, receive_key).map_err(|e| std::io::Error::other(e.reason))?;
         self.ra2 = Some(cipher);
+        Ok(())
+    }
+
+    /// Agent side: accepts a TLS handshake with the agent's certificate
+    /// (VeNCrypt X509*).
+    ///
+    /// # Errors
+    /// The handshake failed or the connection isn't plain TCP.
+    pub async fn accept_tls(&mut self, acceptor: &TlsAcceptor) -> std::io::Result<()> {
+        let Link::Plain(tcp) = std::mem::replace(&mut self.link, Link::Closed) else {
+            return Err(std::io::Error::other(
+                "TLS requested on a non-plain connection",
+            ));
+        };
+        self.link = Link::ServerTls(Box::new(acceptor.accept(tcp).await?));
         Ok(())
     }
 
@@ -116,7 +141,10 @@ impl Transport {
     /// certificate. Signatures are verified; whether the certificate is
     /// *trusted* is decided by the session (CA chain or pinned fingerprint)
     /// before any credentials are sent (ADR-0017).
-    pub(crate) async fn upgrade_tls(&mut self, host: &str) -> std::io::Result<TlsIdentity> {
+    ///
+    /// # Errors
+    /// The handshake failed or the connection isn't plain TCP.
+    pub async fn upgrade_tls(&mut self, host: &str) -> std::io::Result<TlsIdentity> {
         let Link::Plain(tcp) = std::mem::replace(&mut self.link, Link::Closed) else {
             return Err(std::io::Error::other(
                 "TLS requested on a non-plain connection",
@@ -147,6 +175,29 @@ impl Transport {
             valid_chain,
         })
     }
+}
+
+/// Builds the agent's TLS acceptor from its PEM certificate and key.
+///
+/// # Errors
+/// The PEM data is invalid.
+pub fn tls_acceptor(cert_pem: &str, key_pem: &str) -> std::io::Result<TlsAcceptor> {
+    use rustls::pki_types::PrivateKeyDer;
+    use rustls::pki_types::pem::PemObject;
+    let invalid = |e: rustls::pki_types::pem::Error| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
+    };
+    let certs = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(invalid)?;
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).map_err(invalid)?;
+    let config = rustls::ServerConfig::builder_with_provider(provider())
+        .with_safe_default_protocol_versions()
+        .map_err(|e| std::io::Error::other(e.to_string()))?
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    Ok(TlsAcceptor::from(Arc::new(config)))
 }
 
 fn provider() -> Arc<CryptoProvider> {

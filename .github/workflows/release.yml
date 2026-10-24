@@ -60,13 +60,16 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Install GUI build libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev && sudo bash ci/install-spa-headers.sh
       - name: Stamp version
         run: |
           perl -0pi -e 's/^version = "0\.0\.0"/version = "$ENV{VERSION}"/m' Cargo.toml
           cargo update --workspace
       - name: Build
-        run: cargo build --release --locked --target "$TARGET" $(printf -- '-p %s ' $BINS)
+        run: |
+          features=""
+          if [ "$RUNNER_OS" = "Linux" ]; then features="--features farsight-agent/wayland"; fi
+          cargo build --release --locked --target "$TARGET" $(printf -- '-p %s ' $BINS) $features
       - name: Package
         run: |
           name="farsight-${VERSION}-${TARGET}"

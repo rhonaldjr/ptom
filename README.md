@@ -7,9 +7,9 @@ connect to the VNC servers you already have, and it is built to replace TigerVNC
 usually miss: finding computers automatically, keeping several desktops open at once, and keeping your
 passwords safe.
 
-> **Project status: early development.** The **viewer works**, with **encrypted connections**, **saved
-> computers** and **automatic discovery** of computers on your network. It connects to the VNC servers you
-> already run (TigerVNC, x11vnc, and others). Farsight's own server is next (M4). See [what's coming](#whats-coming).
+> **Project status: early development.** The **viewer** works, with encrypted connections, saved computers and
+> automatic discovery. The **agent** can now share your desktop: Wayland (COSMIC, GNOME, KDE) and X11.
+> See [what's coming](#whats-coming).
 
 ---
 
@@ -41,7 +41,7 @@ Sharing and other VNC software.
 | ✅ M2 | **First usable viewer:** connect to your existing VNC servers |
 | ✅ M3 | Secure connections and saved passwords |
 | ✅ M3.5 | Automatic discovery of the computers on your network |
-| M4 | Share your COSMIC / Wayland desktop |
+| ✅ M4 | Share your COSMIC / Wayland desktop |
 | M5 | Share your X11 desktop |
 | M6 | Tabs, windows and the tray icon |
 | M7 | Desktops that keep running in the background |
@@ -80,6 +80,22 @@ farsight -ViewOnly pop-os:1   # watch without controlling
 - Computers you connect to are remembered and searchable from the connect screen. Tick **Remember on this computer**
   to save a password; it's stored encrypted, with the key in your system keyring.
 
+## Share this computer (the agent)
+
+```bash
+farsight-passwd user add $USER                  # your password for connecting from other computers
+farsight-agent --show-identity                  # the fingerprints viewers will ask you to check
+systemctl --user enable --now farsight-agent    # start sharing now and at every login
+```
+
+- By default only this computer can connect. To allow your network, run
+  `systemctl --user edit farsight-agent` and add `--listen lan` to the command. Network connections are always encrypted.
+- On Wayland, your desktop asks once whether Farsight may share the screen. Farsight remembers the answer;
+  `farsight-agent --forget-portal-approval` forgets it.
+- When **you** connect with your own account, you get straight in. Anyone else has to be approved by whoever is at the
+  screen (it's denied after 30 seconds). A tray icon and a notification always show when someone is viewing,
+  with **Disconnect everyone**.
+
 ## Set up passwords for a Farsight server
 
 `farsight-passwd` replaces `vncpasswd`. It never stores passwords in the weak old format:
@@ -101,6 +117,9 @@ sudo apt install libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-d
 ```
 
 Or use Docker. `scripts/docker-cargo.sh build -p farsight` builds the viewer without installing anything.
+
+The agent's Wayland support needs PipeWire's development files and is left out of plain `cargo build`. Build it in
+Docker with `scripts/docker-cargo.sh build -p farsight-agent --features wayland`.
 
 ```bash
 git clone https://github.com/rhonaldjr/ptom.git

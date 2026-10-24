@@ -428,6 +428,15 @@ impl Ra2ServerKey {
     pub fn fingerprint(&self) -> [u8; 32] {
         fingerprint(&self.blob)
     }
+
+    /// The private key as PKCS#8 DER, for storing (keep it 0600).
+    ///
+    /// # Errors
+    /// [`AuthError`] if serialization fails.
+    pub fn to_pkcs8(&self) -> Result<Zeroizing<Vec<u8>>, AuthError> {
+        let der = self.private.as_der().map_err(crypto_error)?;
+        Ok(Zeroizing::new(der.as_ref().to_vec()))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -878,6 +887,13 @@ mod tests {
         input.put_u32(1024);
         input.extend(vec![0xff; 256]);
         assert!(client.advance(&input, &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn pkcs8_round_trip_keeps_the_identity() {
+        let key = Ra2ServerKey::generate().unwrap();
+        let again = Ra2ServerKey::from_pkcs8(&key.to_pkcs8().unwrap()).unwrap();
+        assert_eq!(key.fingerprint(), again.fingerprint());
     }
 
     #[test]

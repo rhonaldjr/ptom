@@ -49,6 +49,19 @@ impl Cursor {
         }
     }
 
+    /// Creates a cursor from straight-alpha RGBA bytes (`width * height * 4`
+    /// of them), as captured on the server. Returns `None` if the length is
+    /// wrong or a side exceeds [`MAX_CURSOR_SIDE`]. The hotspot is clamped
+    /// into the shape.
+    #[must_use]
+    pub fn from_rgba(width: u16, height: u16, hotspot: (u16, u16), rgba: Vec<u8>) -> Option<Self> {
+        let expected = usize::from(width)
+            .checked_mul(usize::from(height))?
+            .checked_mul(4)?;
+        (width <= MAX_CURSOR_SIDE && height <= MAX_CURSOR_SIDE && rgba.len() == expected)
+            .then(|| Self::new(width, height, hotspot, rgba))
+    }
+
     /// Width in pixels.
     #[must_use]
     pub fn width(&self) -> u16 {

@@ -7,7 +7,8 @@
 //!
 //! [`Session`]: farsight_client::Session
 
-mod transport;
+pub mod transport;
 mod viewer;
 
+pub use transport::{Transport, tls_acceptor};
 pub use viewer::{Command, ConnectError, ConnectionHandle, CursorImage, Frame, Update, connect};
