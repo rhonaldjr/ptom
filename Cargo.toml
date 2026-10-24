@@ -8,6 +8,7 @@ default-members = [
   "apps/farsight",
   "apps/farsight-agent",
   "apps/farsight-passwd",
+  "crates/farsight-capture-x11",
   "crates/farsight-client",
   "crates/farsight-codec",
   "crates/farsight-desktop",
@@ -40,6 +41,7 @@ farsight-net = { path = "crates/farsight-net" }
 farsight-vault = { path = "crates/farsight-vault" }
 farsight-discovery = { path = "crates/farsight-discovery" }
 farsight-desktop = { path = "crates/farsight-desktop" }
+farsight-capture-x11 = { path = "crates/farsight-capture-x11" }
 farsight-capture-wayland = { path = "crates/farsight-capture-wayland" }
 
 # External
@@ -56,6 +58,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rustix = { version = "1", features = ["process"] }
+# Pure-Rust X11 protocol (no Xlib, no libxcb); used by farsight-capture-x11.
+x11rb = { version = "0.13", features = ["damage", "xfixes", "xtest", "shm", "randr"] }
 thiserror = "2"
 des = "0.8"
 aes = "0.8"

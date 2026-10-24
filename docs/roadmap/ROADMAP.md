@@ -66,9 +66,12 @@ SRV-3, SRV-4, SRV-7, SRV-8, SRV-9, SRV-10, SRV-12, SEC-10, NET-2, NET-8 (view-on
   Q3 charter for live portals: [docs/testing/charters/2026-10-24-wayland-capture.md](../testing/charters/2026-10-24-wayland-capture.md)
 - Not yet verified on a live Wayland desktop (the build machine runs X11). Clipboard over the Wayland portal is still to come.
 
-## M5: X11 agent (x0vncserver parity) · [council](../council/2026-10-23-initial-roadmap.md#m5-x11-agent)
+## M5: X11 agent (x0vncserver parity) ☑ · [council](../council/2026-10-23-initial-roadmap.md#m5-x11-agent)
 SRV-2, SRV-7 (XTest), SRV-10 (XDamage + polling)
-- `farsight-agent --backend x11` with an Xvfb-based integration test in CI
+- ☑ `farsight-agent --backend x11` (`farsight-capture-x11`, pure-Rust x11rb): XDamage with MIT-SHM or GetImage, polling fallback,
+  RandR resizes, XFixes cursor, XTest input with on-demand keysym remapping, CLIPBOARD both ways
+- ☑ Integration tests against Xvfb, plus an end-to-end CI job: agent on Xvfb ↔ Farsight viewer session, encrypted, owner login, pixels checked
+- ☑ **Condition:** X11 can't isolate clients from each other (any X client can inject input or read the screen); recorded in the threat model
 
 ## M6: Multi-session viewer, tray icon and agent advertising · [council](../council/2026-10-23-initial-roadmap.md#m6-multi-session--discovery) · [tray council](../council/2026-10-23-tray-and-discovery.md#a-viewer-tray-icon)
 PRD-3, VWR-12, VWR-15

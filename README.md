@@ -42,7 +42,7 @@ Sharing and other VNC software.
 | ✅ M3 | Secure connections and saved passwords |
 | ✅ M3.5 | Automatic discovery of the computers on your network |
 | ✅ M4 | Share your COSMIC / Wayland desktop |
-| M5 | Share your X11 desktop |
+| ✅ M5 | Share your X11 desktop |
 | M6 | Tabs, windows and the tray icon |
 | M7 | Desktops that keep running in the background |
 | M8–M10 | Speed, wider compatibility, and hardware acceleration |

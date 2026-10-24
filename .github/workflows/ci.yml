@@ -71,6 +71,17 @@ jobs:
           FARSIGHT_INTEROP_ADDR: 127.0.0.1::15901
           FARSIGHT_INTEROP_EXPECT_ENCRYPTED: ${{ matrix.encrypted }}
 
+  agent-e2e:
+    # farsight-agent sharing a real X server (Xvfb), checked by a Farsight viewer session (M5).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils x11-xserver-utils
+      - run: cargo build -p farsight-agent -p farsight-passwd --locked
+      - run: tests/e2e/agent-x11.sh
+
   deny:
     runs-on: ubuntu-latest
     steps:

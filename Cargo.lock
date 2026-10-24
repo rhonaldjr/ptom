@@ -1881,6 +1881,7 @@ dependencies = [
  "anyhow",
  "aws-lc-rs",
  "farsight-capture-wayland",
+ "farsight-capture-x11",
  "farsight-codec",
  "farsight-desktop",
  "farsight-discovery",
@@ -1913,6 +1914,19 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "farsight-capture-x11"
+version = "0.0.0"
+dependencies = [
+ "farsight-codec",
+ "farsight-rfb",
+ "rustix 1.1.5",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "x11rb",
 ]
 
 [[package]]

@@ -8,7 +8,7 @@ ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/ca
 COPY install-spa-headers.sh /tmp/install-spa-headers.sh
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      ca-certificates curl build-essential pkg-config cmake git jq xvfb x11-utils bzip2 \
+      ca-certificates curl build-essential pkg-config cmake git jq xvfb x11-utils x11-xserver-utils bzip2 \
       libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libssl-dev \
       libpipewire-0.3-dev libclang-dev \
  && rm -rf /var/lib/apt/lists/* \

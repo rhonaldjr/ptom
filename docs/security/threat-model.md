@@ -31,6 +31,7 @@ integrity · viewer host integrity · the local user's awareness that they are b
 | Spoofed discovered server harvests VncAuth responses (T1557/T1110) | Unverified until TOFU · credentials bound to verified identity, never IP · no auto-send | M3.5, M6 |
 | Malicious advertised names (bidi/control chars) in tray or list | `sanitize_name` strips control, bidi and invisible characters and caps length (fuzzed) | M3.5 ✅, M6 |
 | Malicious advertised names (bidi/control chars) in tray or list | Sanitise and length-cap before rendering | M3.5, M6 |
+| Desktop data leaking from the X11 backend (clipboard, keystrokes, screen) | Uses the agent user's own X connection and auth only; clipboard capped at 1 MiB both ways; clipboard text, keysyms and pixels never logged; temporary keycode remaps restored on key release and on shutdown | M5 |
 | Supply-chain compromise | cargo-deny · provenance attestations · SHA-pinned actions | M0 |
 
 ## Accepted risks

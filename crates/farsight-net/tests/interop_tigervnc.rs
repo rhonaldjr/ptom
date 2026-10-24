@@ -43,7 +43,9 @@ async fn connects_authenticates_and_decodes_a_red_desktop() {
                 assert!(handle.send(Command::ConsentInsecure));
             }
             Update::Event(SessionEvent::CredentialsRequired { username }) => {
-                let username = username.then(|| SecretString::from("farsight".to_owned()));
+                let name = std::env::var("FARSIGHT_INTEROP_USERNAME")
+                    .unwrap_or_else(|_| "farsight".into());
+                let username = username.then(|| SecretString::from(name));
                 let password = SecretString::from(password.clone());
                 assert!(handle.send(Command::Credentials { username, password }));
             }

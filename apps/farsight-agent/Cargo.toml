@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 aws-lc-rs.workspace = true
+farsight-capture-x11.workspace = true
 farsight-capture-wayland = { workspace = true, optional = true }
 farsight-codec.workspace = true
 farsight-desktop.workspace = true
