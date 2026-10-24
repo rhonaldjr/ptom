@@ -17,6 +17,7 @@ farsight-rfb = { path = "../crates/farsight-rfb" }
 farsight-security = { path = "../crates/farsight-security" }
 farsight-codec = { path = "../crates/farsight-codec" }
 secrecy = "0.10"
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 
 [[bin]]
 name = "rfb_version"
@@ -70,6 +71,13 @@ bench = false
 [[bin]]
 name = "codec_rect"
 path = "fuzz_targets/codec_rect.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "codec_stream"
+path = "fuzz_targets/codec_stream.rs"
 test = false
 doc = false
 bench = false

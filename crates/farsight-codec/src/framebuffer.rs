@@ -57,7 +57,7 @@ impl Framebuffer {
         usize::from(y) * usize::from(self.width) + usize::from(x)
     }
 
-    fn check(&self, rect: Rect) -> Result<(), DecodeError> {
+    pub(crate) fn check(&self, rect: Rect) -> Result<(), DecodeError> {
         if rect.fits_within(self.width, self.height) {
             Ok(())
         } else {

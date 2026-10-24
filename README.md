@@ -7,8 +7,9 @@ connect to the VNC servers you already have, and it is built to replace TigerVNC
 usually miss: finding computers automatically, keeping several desktops open at once, and keeping your
 passwords safe.
 
-> **Project status: early development.** The core of the VNC protocol is built and tested, but there is no
-> app to use yet. The first usable version will be the viewer (milestone M2). See [what's coming](#whats-coming).
+> **Project status: early development.** The **viewer works**: it connects to the VNC servers you already
+> run (TigerVNC, x11vnc, and others). Encrypted connections and saved passwords are next (milestone M3).
+> See [what's coming](#whats-coming).
 
 ---
 
@@ -37,7 +38,7 @@ Sharing and other VNC software.
 |---|---|
 | ✅ M0 | Project foundation: automated testing and releases |
 | ✅ M1 | The core VNC protocol, built and tested |
-| M2 | **First usable viewer:** connect to your existing VNC servers |
+| ✅ M2 | **First usable viewer:** connect to your existing VNC servers |
 | M3 | Secure connections and saved passwords |
 | M3.5 | Automatic discovery of the computers on your network |
 | M4 | Share your COSMIC / Wayland desktop |
@@ -59,11 +60,29 @@ Every update to the project publishes a new release on the
 Download the file for your system, unpack it, and run `farsight`. Distribution packages (Pop!_OS/Ubuntu,
 Fedora, Arch, Flatpak) are planned.
 
-> Until the first usable milestone, released programs only print their version.
+## Use the viewer
+
+```bash
+farsight                      # opens the "Connect to a computer" screen
+farsight pop-os:1             # connects to display 1 on the computer "pop-os"
+farsight -ViewOnly pop-os:1   # watch without controlling
+```
+
+- Press **F8** for the viewer menu: full screen, view only, Ctrl+Alt+Del, disconnect.
+- The window header always shows whether the connection is **encrypted**. Today only unencrypted VNC
+  connections are possible, so Farsight asks before using one on your network. Encrypted connections arrive in M3.
+- Resizing the window resizes the remote desktop when the server allows it (turn this off with `-RemoteResize=0`).
+- Farsight accepts TigerVNC's `vncviewer` options. Run `farsight --help` to see them.
 
 ## Build locally
 
-You need [Rust](https://rustup.rs) (the stable toolchain), or Docker.
+You need [Rust](https://rustup.rs) (the stable toolchain) and, for the viewer, a few system libraries:
+
+```bash
+sudo apt install libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev
+```
+
+Or use Docker. `scripts/docker-cargo.sh build -p farsight` builds the viewer without installing anything.
 
 ```bash
 git clone https://github.com/rhonaldjr/ptom.git
@@ -72,11 +91,6 @@ cargo build --release        # programs end up in target/release/
 cargo test --workspace       # run the tests
 ```
 
-Without installing Rust:
-
-```bash
-docker run --rm -v "$PWD":/w -w /w rust:latest cargo test --workspace
-```
 
 ## Develop
 
@@ -87,6 +101,12 @@ docker run --rm -v "$PWD":/w -w /w rust:latest cargo test --workspace
   cargo clippy --workspace --all-targets --all-features -- -D warnings
   cargo test --workspace
   scripts/check-layers.sh       # needs jq
+  ```
+- Interop test against a real TigerVNC server:
+  ```bash
+  docker build -t farsight-interop-tigervnc tests/interop/tigervnc
+  docker run -d -p 127.0.0.1:15901:5901 farsight-interop-tigervnc
+  FARSIGHT_INTEROP_ADDR=127.0.0.1::15901 cargo test -p farsight-net --test interop_tigervnc
   ```
 - Fuzz tests (needs nightly Rust and `cargo install cargo-fuzz`): `cd fuzz && cargo +nightly fuzz run rfb_version`
 - Use [Conventional Commits](https://www.conventionalcommits.org) (`feat:`, `fix:`, `docs:` …). Every merge

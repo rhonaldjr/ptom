@@ -26,14 +26,15 @@ NET-1, NET-3, NET-4, NET-5, NET-6, ENC-1, ENC-2, SEC-1, SEC-2, SEC-3
 - ☑ **Conditions:** fuzz target per decoder and state machine · proptest round-trips · RFC 6143 transcript test
   (a transcript recorded from a real TigerVNC server is part of M2's interop condition)
 
-## M2: Viewer MVP: view my existing VNC server · [council](../council/2026-10-23-initial-roadmap.md#m2-viewer-mvp)
+## M2: Viewer MVP: view my existing VNC server ☑ · [council](../council/2026-10-23-initial-roadmap.md#m2-viewer-mvp)
 VWR-1, VWR-2, VWR-3, VWR-5, VWR-6, VWR-10, VWR-14, INP-1, INP-2, INP-5, ENC-5 (decode), ENC-6 (decode)
-- libcosmic viewer: connect, render, keyboard/mouse, clipboard, fullscreen/windowed, scaling, view-only
-- Decoders: Raw, CopyRect, Hextile, ZRLE, Tight (incl. JPEG)
-- Pseudo-encodings: ExtendedDesktopSize/SetDesktopSize (remote resize) and Cursor/CursorWithAlpha, decode only ([scope council](../council/2026-10-23-m2-scope.md))
-- TigerVNC-compatible CLI (`farsight host:display`, `-ViewOnly`, `-FullScreen`, …)
-- **Conditions:** persistent encryption indicator · decoders fuzzed (malicious-server cases, API10)
-  · TigerVNC server interop test in CI
+- ☑ libcosmic viewer: connect, render, keyboard/mouse, clipboard, fullscreen/windowed, scaling, view-only
+- ☑ Decoders: Raw, CopyRect, Hextile, ZRLE, Tight (incl. JPEG)
+- ☑ Pseudo-encodings: ExtendedDesktopSize/SetDesktopSize (remote resize) and Cursor/CursorWithAlpha, decode only ([scope council](../council/2026-10-23-m2-scope.md))
+- ☑ TigerVNC-compatible CLI (`farsight host:display`, `-ViewOnly`, `-FullScreen`, `-RemoteResize`, …)
+- ☑ **Conditions:** persistent encryption indicator (header, and the F8 menu when full screen) · decoders fuzzed
+  (malicious-server cases, API10) · TigerVNC server interop test in CI (`tests/interop/tigervnc`)
+- Not yet verified by hand: the macOS build (tier 2), and clipboard plus keyboard against a full desktop session. These are Q3 charters for the next release.
 
 ## M3: Secure transport and vault · [council](../council/2026-10-23-initial-roadmap.md#m3-secure-transport--vault)
 SEC-5, SEC-6, SEC-7, SEC-8, SEC-9, PRD-10, VWR-8, VWR-9, UTL-1

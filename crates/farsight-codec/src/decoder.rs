@@ -2,16 +2,29 @@
 
 use farsight_rfb::client::RectDecoder;
 use farsight_rfb::wire::Reader;
-use farsight_rfb::{DecodeError, Encoding, Limits, PixelFormat, RectHeader};
+use farsight_rfb::{DecodeError, Encoding, Limits, PixelFormat, RectHeader, Screen};
 
-use crate::{Framebuffer, PixelConverter};
+use crate::cursor::{self, Cursor};
+use crate::desktop::{self, DesktopResize};
+use crate::inflate::ZlibStream;
+use crate::util::need;
+use crate::{Framebuffer, PixelConverter, hextile, tight, zrle};
 
-/// Decodes rectangles into a [`Framebuffer`].
-#[derive(Debug, Clone)]
+/// Decodes rectangles into a [`Framebuffer`], and keeps the per-connection
+/// state that encodings share: the ZRLE and Tight zlib streams, the cursor
+/// shape and the screen layout.
+#[derive(Debug)]
 pub struct Decoder {
     framebuffer: Framebuffer,
     converter: PixelConverter,
     limits: Limits,
+    zrle: ZlibStream,
+    tight: [ZlibStream; tight::STREAMS],
+    cursor: Option<Cursor>,
+    cursor_generation: u64,
+    screens: Vec<Screen>,
+    extended_resize: bool,
+    last_resize: Option<DesktopResize>,
 }
 
 impl Decoder {
@@ -22,6 +35,13 @@ impl Decoder {
             framebuffer: Framebuffer::new(width, height),
             converter: PixelConverter::new(format),
             limits,
+            zrle: ZlibStream::default(),
+            tight: Default::default(),
+            cursor: None,
+            cursor_generation: 0,
+            screens: Vec::new(),
+            extended_resize: false,
+            last_resize: None,
         }
     }
 
@@ -29,6 +49,40 @@ impl Decoder {
     #[must_use]
     pub fn framebuffer(&self) -> &Framebuffer {
         &self.framebuffer
+    }
+
+    /// The cursor shape last sent by the server (Cursor or `CursorWithAlpha`
+    /// pseudo-encoding), or `None` if it has not sent one.
+    #[must_use]
+    pub fn cursor(&self) -> Option<&Cursor> {
+        self.cursor.as_ref()
+    }
+
+    /// Increases every time the cursor shape changes, so the UI can tell
+    /// when to re-upload it.
+    #[must_use]
+    pub fn cursor_generation(&self) -> u64 {
+        self.cursor_generation
+    }
+
+    /// The screen layout from the last applied `ExtendedDesktopSize` rectangle.
+    #[must_use]
+    pub fn screens(&self) -> &[Screen] {
+        &self.screens
+    }
+
+    /// Whether the server supports `SetDesktopSize` (it has sent at least
+    /// one `ExtendedDesktopSize` rectangle).
+    #[must_use]
+    pub fn supports_extended_resize(&self) -> bool {
+        self.extended_resize
+    }
+
+    /// Reason and status of the last `ExtendedDesktopSize` rectangle, so the
+    /// UI can report a refused resize.
+    #[must_use]
+    pub fn last_resize(&self) -> Option<DesktopResize> {
+        self.last_resize
     }
 
     /// Switches to the pixel format just requested with `SetPixelFormat`.
@@ -41,7 +95,7 @@ impl Decoder {
         self.converter.set_colour_map(first, colours);
     }
 
-    fn resize(&mut self, width: u16, height: u16) -> Result<Option<usize>, DecodeError> {
+    fn check_size(&self, width: u16, height: u16) -> Result<(), DecodeError> {
         let max = self.limits.max_framebuffer_side;
         if width > max || height > max {
             return Err(DecodeError::LimitExceeded {
@@ -50,8 +104,42 @@ impl Decoder {
                 max: u64::from(max),
             });
         }
+        Ok(())
+    }
+
+    fn resize(&mut self, width: u16, height: u16) -> Result<Option<usize>, DecodeError> {
+        self.check_size(width, height)?;
         self.framebuffer.resize(width, height);
         Ok(Some(0))
+    }
+
+    fn extended_desktop_size(
+        &mut self,
+        header: &RectHeader,
+        input: &[u8],
+    ) -> Result<Option<usize>, DecodeError> {
+        let Some((change, used)) = desktop::parse(header, input)? else {
+            return Ok(None);
+        };
+        if change.result.applied() {
+            self.check_size(change.width, change.height)?;
+            let size = (self.framebuffer.width(), self.framebuffer.height());
+            // Keep the picture when only the layout changed.
+            if size != (change.width, change.height) {
+                self.framebuffer.resize(change.width, change.height);
+            }
+            self.screens = change.screens;
+        }
+        self.extended_resize = true;
+        self.last_resize = Some(change.result);
+        Ok(Some(used))
+    }
+
+    fn set_cursor(&mut self, decoded: Option<(Cursor, usize)>) -> Option<usize> {
+        let (cursor, used) = decoded?;
+        self.cursor = Some(cursor);
+        self.cursor_generation = self.cursor_generation.wrapping_add(1);
+        Some(used)
     }
 
     fn raw(&mut self, header: &RectHeader, input: &[u8]) -> Result<Option<usize>, DecodeError> {
@@ -73,9 +161,8 @@ impl Decoder {
         input: &[u8],
     ) -> Result<Option<usize>, DecodeError> {
         let mut r = Reader::new(input);
-        let (Ok(src_x), Ok(src_y)) = (r.u16(), r.u16()) else {
-            return Ok(None);
-        };
+        let src_x = need!(r.u16());
+        let src_y = need!(r.u16());
         self.framebuffer.copy(src_x, src_y, header.rect)?;
         Ok(Some(4))
     }
@@ -87,10 +174,37 @@ impl RectDecoder for Decoder {
         header: &RectHeader,
         input: &[u8],
     ) -> Result<Option<usize>, DecodeError> {
+        let rect = header.rect;
         match header.encoding {
-            Encoding::DesktopSize => self.resize(header.rect.width, header.rect.height),
+            Encoding::DesktopSize => self.resize(rect.width, rect.height),
+            Encoding::ExtendedDesktopSize => self.extended_desktop_size(header, input),
             Encoding::Raw => self.raw(header, input),
             Encoding::CopyRect => self.copy_rect(header, input),
+            Encoding::Hextile => {
+                hextile::decode(&mut self.framebuffer, &self.converter, rect, input)
+            }
+            Encoding::Zrle => zrle::decode(
+                &mut self.framebuffer,
+                &mut self.zrle,
+                &self.converter,
+                rect,
+                input,
+            ),
+            Encoding::Tight => tight::decode(
+                &mut self.framebuffer,
+                &mut self.tight,
+                &self.converter,
+                rect,
+                input,
+            ),
+            Encoding::Cursor => {
+                let decoded = cursor::decode_cursor(&self.converter, header, input)?;
+                Ok(self.set_cursor(decoded))
+            }
+            Encoding::CursorWithAlpha => {
+                let decoded = cursor::decode_alpha_cursor(header, input)?;
+                Ok(self.set_cursor(decoded))
+            }
             other => Err(DecodeError::UnsupportedEncoding(other.code())),
         }
     }
@@ -203,5 +317,137 @@ mod tests {
             d.decode_rect(&header, &[]),
             Err(DecodeError::UnsupportedEncoding(99))
         );
+    }
+
+    fn rect_header(x: u16, y: u16, w: u16, h: u16, encoding: Encoding) -> RectHeader {
+        RectHeader {
+            rect: Rect::new(x, y, w, h),
+            encoding,
+        }
+    }
+
+    #[test]
+    fn cursor_rects_update_the_cursor_and_generation() {
+        let mut d = decoder();
+        assert!(d.cursor().is_none());
+        let header = rect_header(1, 1, 2, 1, Encoding::Cursor);
+        let payload = [1, 2, 3, 0, 4, 5, 6, 0, 0b0100_0000];
+        assert_eq!(d.decode_rect(&header, &payload[..8]), Ok(None));
+        assert!(d.cursor().is_none());
+        assert_eq!(d.cursor_generation(), 0);
+        assert_eq!(d.decode_rect(&header, &payload), Ok(Some(9)));
+        let cursor = d.cursor().unwrap();
+        assert_eq!(cursor.rgba(), [0, 0, 0, 0, 6, 5, 4, 255]);
+        assert_eq!(cursor.hotspot(), (1, 0));
+        assert_eq!(d.cursor_generation(), 1);
+        let alpha = rect_header(0, 0, 1, 1, Encoding::CursorWithAlpha);
+        assert_eq!(
+            d.decode_rect(&alpha, &[0, 0, 0, 0, 9, 8, 7, 255]),
+            Ok(Some(8))
+        );
+        assert_eq!(d.cursor().unwrap().rgba(), [9, 8, 7, 255]);
+        assert_eq!(d.cursor_generation(), 2);
+        // Cursor rectangles do not touch the framebuffer.
+        assert!(d.framebuffer().pixels().iter().all(|&p| p == 0));
+    }
+
+    #[test]
+    fn extended_desktop_size_resizes_and_records_layout() {
+        let mut d = decoder();
+        assert!(!d.supports_extended_resize());
+        let screen = Screen {
+            id: 1,
+            x: 0,
+            y: 0,
+            width: 640,
+            height: 480,
+            flags: 0,
+        };
+        let mut payload = vec![1, 0, 0, 0];
+        screen.encode(&mut payload);
+        let header = rect_header(0, 0, 640, 480, Encoding::ExtendedDesktopSize);
+        assert_eq!(d.decode_rect(&header, &payload[..19]), Ok(None));
+        assert!(!d.supports_extended_resize());
+        assert_eq!(d.framebuffer().width(), 4);
+        assert_eq!(d.decode_rect(&header, &payload), Ok(Some(20)));
+        assert!(d.supports_extended_resize());
+        assert_eq!(
+            (d.framebuffer().width(), d.framebuffer().height()),
+            (640, 480)
+        );
+        assert_eq!(d.screens(), [screen]);
+        assert!(d.last_resize().unwrap().applied());
+    }
+
+    #[test]
+    fn refused_resize_keeps_the_framebuffer_and_reports_the_status() {
+        let mut d = decoder();
+        let header = rect_header(1, 1, 9999, 9999, Encoding::ExtendedDesktopSize);
+        assert_eq!(d.decode_rect(&header, &[0, 0, 0, 0]), Ok(Some(4)));
+        assert_eq!(d.framebuffer().width(), 4);
+        let result = d.last_resize().unwrap();
+        assert_eq!(result.reason, crate::ResizeReason::ThisClient);
+        assert_eq!(result.status, crate::ResizeStatus::Prohibited);
+        assert!(result.is_failure());
+        assert!(d.supports_extended_resize());
+    }
+
+    #[test]
+    fn extended_desktop_size_respects_limits() {
+        let mut d = decoder();
+        let header = rect_header(0, 0, 60000, 10, Encoding::ExtendedDesktopSize);
+        assert!(matches!(
+            d.decode_rect(&header, &[0, 0, 0, 0]),
+            Err(DecodeError::LimitExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn layout_only_changes_keep_the_picture() {
+        let mut d = decoder();
+        d.decode_rect(&rect_header(0, 0, 1, 1, Encoding::Raw), &[9, 0, 0, 0])
+            .unwrap();
+        let header = rect_header(0, 0, 4, 4, Encoding::ExtendedDesktopSize);
+        assert_eq!(d.decode_rect(&header, &[0, 0, 0, 0]), Ok(Some(4)));
+        assert_eq!(d.framebuffer().get(0, 0), Some(9));
+    }
+
+    #[test]
+    fn new_encodings_are_dispatched() {
+        let mut d = decoder();
+        // Hextile solid tile.
+        let header = rect_header(0, 0, 2, 2, Encoding::Hextile);
+        assert_eq!(d.decode_rect(&header, &[2, 7, 0, 0, 0]), Ok(Some(5)));
+        assert_eq!(d.framebuffer().get(1, 1), Some(7));
+        // Tight fill.
+        let header = rect_header(2, 2, 2, 2, Encoding::Tight);
+        assert_eq!(d.decode_rect(&header, &[0x80, 0, 0, 5]), Ok(Some(4)));
+        assert_eq!(d.framebuffer().get(3, 3), Some(5));
+        // ZRLE solid tile.
+        let chunk = crate::inflate::test_support::Deflater::default().chunk(&[1, 3, 0, 0]);
+        let mut payload = u32::try_from(chunk.len()).unwrap().to_be_bytes().to_vec();
+        payload.extend(chunk);
+        let header = rect_header(0, 2, 2, 2, Encoding::Zrle);
+        assert_eq!(d.decode_rect(&header, &payload), Ok(Some(payload.len())));
+        assert_eq!(d.framebuffer().get(0, 3), Some(3));
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn decode_never_panics_for_any_encoding(
+            code in proptest::prop_oneof![
+                proptest::prelude::Just(0i32), proptest::prelude::Just(1), proptest::prelude::Just(5),
+                proptest::prelude::Just(7), proptest::prelude::Just(16), proptest::prelude::Just(-223),
+                proptest::prelude::Just(-239), proptest::prelude::Just(-308), proptest::prelude::Just(-314),
+            ],
+            x in 0u16..40, y in 0u16..40, w in 0u16..40, h in 0u16..40,
+            bytes in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..300),
+        ) {
+            let mut d = Decoder::new(32, 32, PixelFormat::RGB888, Limits::DEFAULT);
+            let header = rect_header(x, y, w, h, Encoding::from_code(code));
+            if let Ok(Some(used)) = d.decode_rect(&header, &bytes) {
+                proptest::prop_assert!(used <= bytes.len());
+            }
+        }
     }
 }

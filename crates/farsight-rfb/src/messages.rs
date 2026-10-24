@@ -7,7 +7,7 @@
 //! caller can skip them without buffering.
 
 use crate::wire::{Reader, WriteExt, wire_length};
-use crate::{DecodeError, Encoding, Limits, PixelFormat, Rect};
+use crate::{DecodeError, Encoding, Limits, PixelFormat, Rect, Screen};
 
 /// Client-to-server message type codes.
 mod client_type {
@@ -17,6 +17,7 @@ mod client_type {
     pub const KEY_EVENT: u8 = 4;
     pub const POINTER_EVENT: u8 = 5;
     pub const CLIENT_CUT_TEXT: u8 = 6;
+    pub const SET_DESKTOP_SIZE: u8 = 251;
 }
 
 /// Server-to-client message type codes.
@@ -88,6 +89,16 @@ pub enum ClientMessage {
     },
     /// Clipboard contents from the viewer.
     ClientCutText(CutText),
+    /// Ask the server to change the desktop size and screen layout. Only
+    /// valid once the server has sent an `ExtendedDesktopSize` rectangle.
+    SetDesktopSize {
+        /// Requested framebuffer width.
+        width: u16,
+        /// Requested framebuffer height.
+        height: u16,
+        /// Requested screen layout (at most 255 screens).
+        screens: Vec<Screen>,
+    },
 }
 
 impl ClientMessage {
@@ -138,6 +149,27 @@ impl ClientMessage {
                 out.put_u8(client_type::CLIENT_CUT_TEXT);
                 out.put_padding(3);
                 put_cut_text(out, text)?;
+            }
+            Self::SetDesktopSize {
+                width,
+                height,
+                screens,
+            } => {
+                let count =
+                    u8::try_from(screens.len()).map_err(|_| DecodeError::LimitExceeded {
+                        what: "screens",
+                        len: screens.len() as u64,
+                        max: u64::from(u8::MAX),
+                    })?;
+                out.put_u8(client_type::SET_DESKTOP_SIZE);
+                out.put_padding(1);
+                out.put_u16(*width);
+                out.put_u16(*height);
+                out.put_u8(count);
+                out.put_padding(1);
+                for screen in screens {
+                    screen.encode(out);
+                }
             }
         }
         Ok(())
@@ -194,6 +226,22 @@ impl ClientMessage {
             client_type::CLIENT_CUT_TEXT => {
                 r.skip(3)?;
                 Self::ClientCutText(read_cut_text(&mut r, limits)?)
+            }
+            client_type::SET_DESKTOP_SIZE => {
+                r.skip(1)?;
+                let width = r.u16()?;
+                let height = r.u16()?;
+                let count = r.u8()?;
+                r.skip(1)?;
+                let mut screens = Vec::with_capacity(usize::from(count));
+                for _ in 0..count {
+                    screens.push(Screen::decode(&mut r)?);
+                }
+                Self::SetDesktopSize {
+                    width,
+                    height,
+                    screens,
+                }
             }
             other => return Err(DecodeError::UnknownMessageType(other)),
         };
@@ -418,6 +466,33 @@ mod tests {
                 y: 480,
             },
             ClientMessage::ClientCutText(CutText::Text(b"hello".to_vec())),
+            ClientMessage::SetDesktopSize {
+                width: 3840,
+                height: 1080,
+                screens: vec![
+                    Screen {
+                        id: 1,
+                        x: 0,
+                        y: 0,
+                        width: 1920,
+                        height: 1080,
+                        flags: 0,
+                    },
+                    Screen {
+                        id: 2,
+                        x: 1920,
+                        y: 0,
+                        width: 1920,
+                        height: 1080,
+                        flags: 0x8000_0001,
+                    },
+                ],
+            },
+            ClientMessage::SetDesktopSize {
+                width: 0,
+                height: 0,
+                screens: vec![],
+            },
         ] {
             round_trip_client(&message);
         }
@@ -433,6 +508,44 @@ mod tests {
         .encode(&mut out)
         .unwrap();
         assert_eq!(out, [4, 1, 0, 0, 0, 0, 0, 0x61]);
+    }
+
+    #[test]
+    fn set_desktop_size_matches_spec_layout() {
+        let mut out = Vec::new();
+        ClientMessage::SetDesktopSize {
+            width: 0x0400,
+            height: 0x0300,
+            screens: vec![Screen {
+                id: 7,
+                x: 1,
+                y: 2,
+                width: 0x0400,
+                height: 0x0300,
+                flags: 9,
+            }],
+        }
+        .encode(&mut out)
+        .unwrap();
+        let header = [251, 0, 0x04, 0x00, 0x03, 0x00, 1, 0];
+        let screen = [0, 0, 0, 7, 0, 1, 0, 2, 0x04, 0x00, 0x03, 0x00, 0, 0, 0, 9];
+        assert_eq!(out, [header.as_slice(), screen.as_slice()].concat());
+    }
+
+    #[test]
+    fn set_desktop_size_with_too_many_screens_cannot_be_encoded() {
+        let message = ClientMessage::SetDesktopSize {
+            width: 1,
+            height: 1,
+            screens: vec![Screen::default(); 256],
+        };
+        assert!(matches!(
+            message.encode(&mut Vec::new()),
+            Err(DecodeError::LimitExceeded {
+                what: "screens",
+                ..
+            })
+        ));
     }
 
     #[test]

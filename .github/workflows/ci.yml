@@ -13,9 +13,12 @@ env:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - name: Install GUI build libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -28,15 +31,34 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-22.04, macos-latest]
     runs-on: ${{ matrix.os }}
     # macOS is tier 2 (ADR-0004): reported, never release-blocking.
     continue-on-error: ${{ matrix.os == 'macos-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install GUI build libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features --locked
+
+  interop:
+    # Black-box interop against a real TigerVNC server (ADR-0011 allows this).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Start TigerVNC
+        run: |
+          docker build -t farsight-interop-tigervnc tests/interop/tigervnc
+          docker run -d -p 127.0.0.1:15901:5901 farsight-interop-tigervnc
+          sleep 3
+      - run: cargo test -p farsight-net --test interop_tigervnc --locked -- --nocapture
+        env:
+          FARSIGHT_INTEROP_ADDR: 127.0.0.1::15901
 
   deny:
     runs-on: ubuntu-latest
