@@ -1,6 +1,6 @@
 # ADR-0010: LAN discovery over mDNS / DNS-SD
 
-- **Status:** Accepted (council), extended by [ADR-0012](0012-active-rfb-probing.md) · **Date:** 2026-10-23
+- **Status:** Accepted (council), extended by [ADR-0012](0012-active-rfb-probing.md), amended by [ADR-0019](0019-advertise-on-trusted-networks.md) · **Date:** 2026-10-23
 - **Requirements:** PRD-4, VWR-13
 
 ## Decision

@@ -27,6 +27,7 @@ and windows, LAN discovery of agents, and an encrypted credential vault.
 | Agent | Server core + capture backends + desktop integration; accept prompt for non-owner logins; loopback default | [0018](docs/adr/0018-agent-architecture.md) |
 | Discovery | mDNS / DNS-SD `_rfb._tcp` | [0010](docs/adr/0010-lan-discovery.md) |
 | Agent credentials | Argon2id user hashes; legacy VncAuth sealed in the keyring-backed vault; never write `~/.vnc/passwd` | [0014](docs/adr/0014-agent-credentials.md) |
+| Agent advertising | Only on networks the user marked as theirs (`--trust-this-network`) | [0019](docs/adr/0019-advertise-on-trusted-networks.md) |
 | Discovery of any VNC server | Passive mDNS always on; active probing only on user-marked networks | [0012](docs/adr/0012-active-rfb-probing.md) |
 | Viewer tray icon | `ksni` (SNI) on Linux, NSStatusItem on macOS, behind a port; no-host fallback | [0013](docs/adr/0013-viewer-tray-icon.md) |
 
@@ -111,6 +112,9 @@ No local toolchain? `docker run --rm -v "$PWD":/w -w /w rust:latest cargo test -
   milestone branch (`m<N>/<slug>`) and, when every item in the milestone is done, make **one**
   Conventional Commit for the whole milestone. That commit ticks its boxes in
   [ROADMAP.md](docs/roadmap/ROADMAP.md). Squash any interim work commits into it.
+- **Keep ROADMAP.md progress visible** (user instruction). Items are GitHub checkboxes (`- [x]` done, `- [ ]` not);
+  each milestone heading says ✅ Done or ⬜ Not started, and the "Status at a glance" table at the top must match.
+  Tick items and update the table in the same commit that finishes them.
 - **Update README.md when you complete a milestone**, in the same milestone commit. Write for users:
   plain language, little jargon. Cover what Farsight is, what works today, what's coming, how to install,
   and how to use it. Technical detail belongs only in the "Build locally" and "Develop" sections.

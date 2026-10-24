@@ -19,7 +19,7 @@ Both reviewers verified their findings by reading the code. Overlapping findings
 | 8 | "Disconnect everyone" missed stuck tasks and allowed instant reconnects (EH M5) | Medium | Tasks are aborted outright; sharing pauses for 2 minutes |
 | 9 | Argon2id password checks on async workers (SA 8, EH M1) | Medium | Login polling runs in `block_in_place` |
 | 10 | A spoofed discovered computer using a saved computer's name looked like a normal new computer (EH M6) | Medium | The Home list and tray warn when a discovered name matches a saved computer at a different address |
-| 11 | The agent advertises on every network it joins (SA 11) | Minor | **Not changed** (council-approved behaviour). Logged as P-32 for the user |
+| 11 | The agent advertises on every network it joins (SA 11) | Minor | **Fixed** after the user's decision on P-32: the agent announces only on networks marked as theirs (ADR-0019) |
 | 12 | VncAuth/None and `--allow-legacy` never took effect, contradicting the docs (SA 7) | Minor | Implemented as documented; `SecurityPolicy` still gates them |
 | 13 | systemd unit made credentials writable and failed on a fresh install (SA 9, 10) | Minor | `ReadWritePaths=-%h/.config/farsight/agent -%t/farsight` |
 | 14 | An unapproved viewer counted as "admitted" for exclusive-access checks (SA 12) | Minor | `AccessControl::started` marks admission only once `ServerInit` is sent |

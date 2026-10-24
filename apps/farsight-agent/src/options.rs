@@ -34,6 +34,8 @@ pub struct AgentOptions {
     pub advertise: bool,
     pub show_identity: bool,
     pub forget_portal_approval: bool,
+    /// `--trust-this-network` (true) / `--untrust-this-network` (false).
+    pub change_trust: Option<bool>,
 }
 
 impl Default for AgentOptions {
@@ -47,6 +49,7 @@ impl Default for AgentOptions {
             advertise: true,
             show_identity: false,
             forget_portal_approval: false,
+            change_trust: None,
         }
     }
 }
@@ -82,7 +85,10 @@ Shares this desktop with Farsight and other VNC viewers.
   --port N, -rfbport N         TCP port (default 5900)
   --view-only                  Viewers can watch but not control
   --allow-legacy               On the network, also allow unencrypted VncAuth (not recommended)
-  --no-advertise               Don't announce this computer on the local network
+  --no-advertise               Never announce this computer on the local network
+  --trust-this-network         Announce this computer on the current network (e.g. at home), then exit.
+                               With --listen lan, the agent announces itself only on trusted networks
+  --untrust-this-network       Stop announcing on the current network, then exit
   --show-identity              Print the fingerprints viewers will see, then exit
   --forget-portal-approval     Forget the remembered Wayland screen-sharing approval, then exit
   -h, --help, --version
@@ -133,6 +139,8 @@ impl Command {
                 "no-advertise" => o.advertise = false,
                 "show-identity" => o.show_identity = true,
                 "forget-portal-approval" => o.forget_portal_approval = true,
+                "trust-this-network" => o.change_trust = Some(true),
+                "untrust-this-network" => o.change_trust = Some(false),
                 _ => return Err(UsageError(format!("unknown option {arg}"))),
             }
         }

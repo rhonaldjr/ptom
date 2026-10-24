@@ -24,7 +24,7 @@ integrity · viewer host integrity · the local user's awareness that they are b
 | API4 resource exhaustion (cut text, encodings count, zlib bombs) | Bounded decoders · fuzzing | M1, M8 |
 | API3 view-only client sends input | Enforced by `ServerSession` (tested) | M4 ✅ |
 | API10 malicious server → viewer RCE/DoS | Memory-safe decoders · fuzzing · bounds checks | M2 |
-| T1046 discovery recon / rogue-agent spoofing | Minimal TXT · unverified-until-fingerprint | M6 |
+| T1046 discovery recon / rogue-agent spoofing | Minimal TXT · unverified-until-fingerprint · agent announces only on user-trusted networks (ADR-0019) | M6 ✅ |
 | T1543.002 persistence via systemd | User unit only, shipped disabled · refuses root · hardened (ADR-0009, U-6) | M4 ✅ |
 | Silent surveillance of the local user | Presence tray icon plus a notification per connection; approval prompt for non-owners, denied after 30 s (U-2, U-4) | M4 ✅ |
 | T1046 from our own prober (IDS alerts, AUP breach on foreign networks) | Active probing only on user-marked networks · local subnets only · rate-limited · banner only; fuzz-tested that only one version message is ever sent (ADR-0012) | M3.5 ✅ |

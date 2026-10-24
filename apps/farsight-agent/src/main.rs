@@ -1,6 +1,7 @@
 //! `farsight-agent`: shares this desktop with Farsight and other VNC viewers.
 //! Composition root (ADR-0018); the protocol lives in `farsight-server`.
 
+mod advertise;
 mod capture;
 mod identity;
 mod options;
@@ -65,6 +66,9 @@ fn main() -> ExitCode {
 async fn run(options: AgentOptions) -> Result<()> {
     if rustix::process::geteuid().is_root() {
         bail!("farsight-agent must not run as root; run it as the desktop user (ADR-0009)");
+    }
+    if let Some(trust) = options.change_trust {
+        return advertise::change_trust(&Identity::default_dir()?, trust);
     }
     let host = host_name();
     let identity = Identity::load_or_create(&Identity::default_dir()?, &host)?;
@@ -141,9 +145,9 @@ async fn run(options: AgentOptions) -> Result<()> {
 
     let listener = bind(options.listen, options.port).await?;
     info!(address = %listener.local_addr()?, ?backend, "sharing this desktop");
-    // ADR-0010: announce only when the network may connect, with a minimal TXT
-    // record (presence + fingerprint). Kept alive for the agent's lifetime.
-    let _advertisement = if options.listen == Listen::Lan && options.advertise {
+    // ADR-0010 + P-32: announce only when the network may connect, only on
+    // networks the user marked as theirs, with a minimal TXT record.
+    if options.listen == Listen::Lan && options.advertise {
         let config = farsight_discovery::AdvertiseConfig {
             instance_name: host.clone(),
             host_name: host.clone(),
@@ -151,16 +155,8 @@ async fn run(options: AgentOptions) -> Result<()> {
             fingerprint: hex(&identity.tls_fingerprint()?),
             addresses: Vec::new(),
         };
-        match farsight_discovery::advertise(&config) {
-            Ok(advertisement) => Some(advertisement),
-            Err(error) => {
-                warn!(%error, "could not announce this computer on the network");
-                None
-            }
-        }
-    } else {
-        None
-    };
+        tokio::spawn(advertise::run(Identity::default_dir()?, config));
+    }
     let pump = tokio::spawn(Arc::clone(&agent).pump(capture));
     tokio::select! {
         result = Arc::clone(&agent).listen(listener) => result,

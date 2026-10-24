@@ -175,6 +175,9 @@ X11 is inherently less isolated. **Accepted.** · UX/PA/EH/BA SUPPORT.
 
 **Outcome:** ACCEPTED-WITH-CONDITIONS (ADR-0010) · Roadmap M6
 
+> **Amended by the user (2026-10-24, P-32):** after the M4–M6 security review, the agent advertises only on networks
+> the user marked as theirs ([ADR-0019](../adr/0019-advertise-on-trusted-networks.md)).
+
 ---
 
 ## M7: Headless desktops

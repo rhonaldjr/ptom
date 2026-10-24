@@ -91,7 +91,8 @@ farsight-agent --show-identity                  # the fingerprints viewers will 
 systemctl --user enable --now farsight-agent    # start sharing now and at every login
 ```
 
-- On your network the agent announces itself, so viewers find it automatically (turn this off with `--no-advertise`).
+- To let viewers find this computer automatically at home, run `farsight-agent --trust-this-network` once while on your
+  home network. The agent announces itself only on networks you've marked this way, never on café or office Wi-Fi.
 - By default only this computer can connect. To allow your network, run
   `systemctl --user edit farsight-agent` and add `--listen lan` to the command. Network connections are always encrypted.
 - On Wayland, your desktop asks once whether Farsight may share the screen. Farsight remembers the answer;
