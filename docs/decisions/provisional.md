@@ -6,12 +6,29 @@ promote it to an ADR.
 
 | # | Date | Milestone | Decision | Rationale | Status |
 |---|---|---|---|---|---|
-| P-1 | 2026-10-23 | M2 | Pull ExtendedDesktopSize/SetDesktopSize and Cursor/CursorWithAlpha decoding into M2 ([council](../council/2026-10-23-m2-scope.md)) | VWR-3 (remote resize) needs them, and the viewer is unusable with a laggy remote-drawn pointer | Open |
-| P-2 | 2026-10-23 | M2 | Mouse **back** button sends RFB button 8; **forward** is not sent until ExtendedMouseButtons (M9) | The core pointer message has only 8 button bits | Open |
-| P-3 | 2026-10-23 | M2 | App ID `ca.akrotechnologies.Farsight` | Reverse-DNS of the maintainer's domain | Open |
-| P-4 | 2026-10-23 | M2 | Linux release builds and CI run on **Ubuntu 22.04** (glibc 2.35) | Binaries built on newer glibc don't run on Pop!_OS 22.04 | Open |
-| P-5 | 2026-10-23 | M2 | Viewer menu opens with **F8** (TigerVNC default) and offers full screen, view only, Ctrl+Alt+Del and disconnect | Matches TigerVNC muscle memory (Nielsen #4) | Open |
-| P-6 | 2026-10-23 | M2 | `deny.toml`: allow the **Unlicense** (libcosmic's `apply`); declare MPL-2.0/MIT for libcosmic crates without a licence field; allow git sources from pop-os, iced-rs and jackpot51; check "unmaintained" advisories for **direct** dependencies only | Needed to depend on libcosmic (ADR-0003). Every licence was checked against the upstream LICENSE files. Transitive unmaintained crates are libcosmic's to fix | Open |
-| P-7 | 2026-10-23 | M3 | Every successful connection is saved and its identity pinned automatically. Passwords are saved only on "Remember on this computer" | TOFU needs a pin to compare against; TigerVNC keeps known hosts the same way | Open |
-| P-8 | 2026-10-23 | M3 | Without an OS keyring, saved computers are switched off with a visible notice. The vault's passphrase fallback has no unlock screen yet | Keeps M3 scoped; the vault crate already supports passphrases | Open |
-| P-9 | 2026-10-23 | M3 | Vault and agent credentials use the RustCrypto 0.11 hash family and `keyring-core` with a pure-Rust Secret Service backend (zbus 5) | No C D-Bus library, no OpenSSL | Open |
+| P-1 | 2026-10-23 | M2 | Pull ExtendedDesktopSize/SetDesktopSize and Cursor/CursorWithAlpha decoding into M2 ([council](../council/2026-10-23-m2-scope.md)) | VWR-3 (remote resize) needs them, and the viewer is unusable with a laggy remote-drawn pointer | **Confirmed by the user (2026-10-24)** |
+| P-2 | 2026-10-23 | M2 | Mouse **back** button sends RFB button 8; **forward** is not sent until ExtendedMouseButtons (M9) | The core pointer message has only 8 button bits | **Confirmed by the user (2026-10-24)** |
+| P-3 | 2026-10-23 | M2 | App ID `ca.akrotechnologies.Farsight` | Reverse-DNS of the maintainer's domain | **Confirmed by the user (2026-10-24)** |
+| P-4 | 2026-10-23 | M2 | Linux release builds and CI run on **Ubuntu 22.04** (glibc 2.35) | Binaries built on newer glibc don't run on Pop!_OS 22.04 | **Confirmed by the user (2026-10-24)** |
+| P-5 | 2026-10-23 | M2 | Viewer menu opens with **F8** (TigerVNC default) and offers full screen, view only, Ctrl+Alt+Del and disconnect | Matches TigerVNC muscle memory (Nielsen #4) | **Confirmed by the user (2026-10-24)** |
+| P-6 | 2026-10-23 | M2 | `deny.toml`: allow the **Unlicense** (libcosmic's `apply`); declare MPL-2.0/MIT for libcosmic crates without a licence field; allow git sources from pop-os, iced-rs and jackpot51; check "unmaintained" advisories for **direct** dependencies only | Needed to depend on libcosmic (ADR-0003). Every licence was checked against the upstream LICENSE files. Transitive unmaintained crates are libcosmic's to fix | **Confirmed by the user (2026-10-24)** |
+| P-7 | 2026-10-23 | M3 | Every successful connection is saved and its identity pinned automatically. Passwords are saved only on "Remember on this computer" | TOFU needs a pin to compare against; TigerVNC keeps known hosts the same way | **Confirmed by the user (2026-10-24)** |
+| P-8 | 2026-10-23 | M3 | Without an OS keyring, saved computers are switched off with a visible notice. The vault's passphrase fallback has no unlock screen yet | Keeps M3 scoped; the vault crate already supports passphrases | **Changed by the user (2026-10-24): add a passphrase unlock screen in M3.5** |
+| P-9 | 2026-10-23 | M3 | Vault and agent credentials use the RustCrypto 0.11 hash family and `keyring-core` with a pure-Rust Secret Service backend (zbus 5) | No C D-Bus library, no OpenSSL | **Confirmed by the user (2026-10-24)** |
+| P-10 | 2026-10-24 | all | "Push everything to GitHub after each milestone" is read as **push each milestone branch** (`m0/…` to `m6/…`), **not `main`**. Pushing or merging to `main` publishes a release (ADR-0005), which is hard to undo, so it waits for you | **Irreversible-action guard**: opening a PR and merging remain your call | Open |
+| P-11 | 2026-10-24 | M3.5 | Active scan skips a host's remaining ports if the first port times out silently (hosts in the ARP table are always fully probed) | Keeps a /24 scan inside the 30 s council bound (worst case ~44 s otherwise); a host that silently drops 5900 but serves 5901 can be missed | Open |
+| P-12 | 2026-10-24 | M3.5 | The viewer scans automatically at startup on networks marked "This is my network"; "Stop scanning this network" removes the mark | ADR-0012: automatic after a one-time consent per network | Open |
+| P-13 | 2026-10-24 | M3.5 | A network is identified by SHA-256 of default-gateway MAC + subnet; networks without a resolvable gateway MAC can't be trusted (no scan offered) | Stable across DHCP renewals, different for each router | Open |
+| P-14 | 2026-10-24 | M3.5 | `DiscoveredServer` lives in `farsight-discovery`, not in `farsight-client` as ADR-0012 sketched | The viewer uses it directly; moving it behind a port is a refactor for when a second consumer appears | Open |
+
+## User decisions (2026-10-24, before the M3.5–M6 build)
+
+| # | Decision |
+|---|---|
+| U-1 | Build M3.5 (discovery and passphrase unlock), then M4, M5 and M6, in roadmap order |
+| U-2 | **Accept prompt:** a live-desktop connection asks the person at the screen (Allow/Deny, denied after 30 s) **unless the viewer authenticated as the same OS user account** that runs the agent. Password-only types (VncAuth) carry no username, so they always prompt |
+| U-3 | **Wayland:** keep the portal restore token so access is approved once per login; it can be revoked in the agent settings |
+| U-4 | **Presence indicator (SRV-12):** tray icon (red while connected, with "Disconnect everyone") plus a desktop notification on each connection |
+| U-5 | The agent listens on **loopback by default**; `--listen lan` opts in to network access, which is encrypted-only (ADR-0009 unchanged) |
+| U-6 | systemd **user** unit shipped but **not enabled** on install |
+| U-7 | A second computer opens in a **new tab** by default; it can be moved to its own window |

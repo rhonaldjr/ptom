@@ -16,6 +16,7 @@ farsight-vault.workspace = true
 farsight-discovery.workspace = true
 libcosmic.workspace = true
 secrecy.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

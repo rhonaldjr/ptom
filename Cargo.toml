@@ -26,6 +26,8 @@ farsight-discovery = { path = "crates/farsight-discovery" }
 
 # External
 anyhow = "1"
+mdns-sd = { version = "0.21", default-features = false, features = ["async"] }
+if-addrs = "0.15"
 bytes = "1"
 libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "430f3d48a97d8779f9c1985473912e594ccca1ae", default-features = false, features = ["winit", "tokio", "wgpu", "multi-window"] }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }

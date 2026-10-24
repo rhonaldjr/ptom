@@ -4,6 +4,7 @@
 
 mod app;
 mod keymap;
+mod nearby;
 mod store;
 
 use std::process::ExitCode;

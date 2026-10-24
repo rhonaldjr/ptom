@@ -432,3 +432,20 @@ fn server_ids_round_trip_as_text() {
     assert_eq!(text.parse::<farsight_vault::ServerId>().unwrap(), id);
     assert!("xyz".parse::<farsight_vault::ServerId>().is_err());
 }
+
+#[test]
+fn trusted_networks_persist_and_can_be_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let keys = farsight_vault::MemoryKeySource::generate().unwrap();
+    let path = dir.path().join("vault.bin");
+    let mut vault = farsight_vault::Vault::create(&path, &keys).unwrap();
+    let now = farsight_vault::Timestamp::now();
+    vault.trust_network("abc", "Home", now);
+    vault.trust_network("abc", "Home again", now);
+    assert_eq!(vault.trusted_networks().len(), 1);
+    vault.save().unwrap();
+    let mut reopened = farsight_vault::Vault::open(&path, &keys).unwrap();
+    assert!(reopened.is_trusted_network("abc"));
+    assert!(reopened.untrust_network("abc"));
+    assert!(!reopened.is_trusted_network("abc"));
+}

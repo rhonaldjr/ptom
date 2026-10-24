@@ -20,6 +20,7 @@ use farsight_rfb::SecurityType;
 use secrecy::SecretString;
 
 use crate::keymap;
+use crate::nearby::{Discovery, Encryption, Nearby, NearbyEntry, Scan};
 use crate::store::{Entry, Remember, Store};
 
 /// Keysyms sent by the "Send Ctrl+Alt+Del" menu entry.
@@ -31,6 +32,10 @@ const PIXELS_PER_NOTCH: f32 = 50.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Screen {
+    Unlock {
+        creating: bool,
+        error: Option<String>,
+    },
     Connect,
     Connecting,
     Credentials {
@@ -73,6 +78,10 @@ pub enum Message {
     Connect,
     BackToStart,
     Pick(ServerAddress),
+    Nearby(NearbyMessage),
+    PassphraseChanged(String),
+    Unlock,
+    SkipUnlock,
     UsernameChanged(String),
     PasswordChanged(String),
     TogglePasswordVisibility,
@@ -109,6 +118,17 @@ pub enum Message {
     Disconnect,
 }
 
+/// Messages for "Computers on your network".
+#[derive(Debug, Clone)]
+pub enum NearbyMessage {
+    Discovery(Discovery),
+    TrustNetworkAndScan,
+    Rescan,
+    CancelScan,
+    ForgetNetwork,
+    Add(ServerAddress, String),
+}
+
 #[derive(Debug, Clone)]
 struct Connected {
     name: String,
@@ -123,11 +143,15 @@ pub struct App {
     screen: Screen,
     address_input: String,
     username_input: String,
+    passphrase_input: String,
     password_input: String,
     password_hidden: bool,
     remember: bool,
     change_acknowledged: bool,
     store: Store,
+    nearby: Nearby,
+    network: Option<String>,
+    scan_attempt: Option<u64>,
     target: Option<ServerAddress>,
     stored_credentials: Option<Remember>,
     pending_remember: Option<Remember>,
@@ -176,11 +200,17 @@ impl cosmic::Application for App {
             options,
             screen: Screen::Connect,
             username_input: String::new(),
+            passphrase_input: String::new(),
             password_input: String::new(),
             password_hidden: true,
             remember: false,
             change_acknowledged: false,
             store: Store::open(),
+            nearby: Nearby::default(),
+            network: farsight_discovery::current_networks()
+                .first()
+                .map(|n| n.as_str().to_owned()),
+            scan_attempt: None,
             target: None,
             stored_credentials: None,
             pending_remember: None,
@@ -199,7 +229,13 @@ impl cosmic::Application for App {
             pressed_keys: HashMap::new(),
         };
         let mut tasks = vec![app.update_title()];
-        if let Some(server) = app.options.server.clone() {
+        app.scan_if_trusted();
+        if app.store.locked() {
+            app.screen = Screen::Unlock {
+                creating: !Store::exists(),
+                error: None,
+            };
+        } else if let Some(server) = app.options.server.clone() {
             tasks.push(app.start(server, app.options.allow_insecure));
         }
         (app, Task::batch(tasks))
@@ -211,6 +247,16 @@ impl cosmic::Application for App {
             subscriptions.push(
                 iced::time::every(std::time::Duration::from_millis(500))
                     .map(|_| Message::ResizeTick),
+            );
+        }
+        subscriptions.push(
+            Subscription::run(crate::nearby::browse)
+                .map(|d| Message::Nearby(NearbyMessage::Discovery(d))),
+        );
+        if let Some(attempt) = self.scan_attempt {
+            subscriptions.push(
+                Subscription::run_with(attempt, crate::nearby::scan)
+                    .map(|d| Message::Nearby(NearbyMessage::Discovery(d))),
             );
         }
         if let Some(request) = &self.request {
@@ -229,6 +275,24 @@ impl cosmic::Application for App {
             },
             Message::BackToStart | Message::Disconnect => return self.disconnect(),
             Message::Pick(address) => return self.start(address, self.options.allow_insecure),
+            Message::Nearby(message) => self.on_nearby(message),
+            Message::PassphraseChanged(text) => self.passphrase_input = text,
+            Message::Unlock => {
+                let passphrase = SecretString::from(std::mem::take(&mut self.passphrase_input));
+                match self.store.unlock(passphrase) {
+                    Ok(()) => return self.after_unlock(),
+                    Err(error) => {
+                        self.screen = Screen::Unlock {
+                            creating: !Store::exists(),
+                            error: Some(error),
+                        };
+                    }
+                }
+            }
+            Message::SkipUnlock => {
+                self.store.skip();
+                return self.after_unlock();
+            }
             Message::UsernameChanged(text) => self.username_input = text,
             Message::PasswordChanged(text) => self.password_input = text,
             Message::TogglePasswordVisibility => self.password_hidden = !self.password_hidden,
@@ -324,6 +388,7 @@ impl cosmic::Application for App {
 
     fn view(&self) -> Element<'_, Message> {
         let content: Element<'_, Message> = match &self.screen {
+            Screen::Unlock { creating, error } => self.unlock_view(*creating, error.as_deref()),
             Screen::Connect => self.connect_view(),
             Screen::Connecting => centred(
                 widget::Column::new()
@@ -408,6 +473,180 @@ impl App {
         });
         self.screen = Screen::Connecting;
         Task::none()
+    }
+
+    fn on_nearby(&mut self, message: NearbyMessage) {
+        match message {
+            NearbyMessage::Discovery(discovery) => {
+                let finished = matches!(discovery, Discovery::ProbeFinished(_));
+                self.nearby.record(discovery);
+                if finished {
+                    self.scan_attempt = None;
+                }
+            }
+            NearbyMessage::TrustNetworkAndScan => {
+                if let Some(network) = self.network.clone() {
+                    self.store.trust_network(&network);
+                }
+                self.start_scan();
+            }
+            NearbyMessage::Rescan => self.start_scan(),
+            NearbyMessage::CancelScan => {
+                self.scan_attempt = None;
+                self.nearby.scan = None;
+            }
+            NearbyMessage::ForgetNetwork => {
+                if let Some(network) = self.network.clone() {
+                    self.store.forget_network(&network);
+                }
+                self.scan_attempt = None;
+            }
+            NearbyMessage::Add(address, label) => {
+                self.store.add(&address, &label);
+            }
+        }
+    }
+
+    fn network_trusted(&self) -> bool {
+        self.network
+            .as_deref()
+            .is_some_and(|n| self.store.is_trusted_network(n))
+    }
+
+    /// Scans automatically on networks the user marked as their own (ADR-0012).
+    fn scan_if_trusted(&mut self) {
+        if self.network_trusted() {
+            self.start_scan();
+        }
+    }
+
+    fn start_scan(&mut self) {
+        self.attempts += 1;
+        self.scan_attempt = Some(self.attempts);
+        self.nearby.scan = Some(Scan::Running { done: 0, total: 0 });
+    }
+
+    fn nearby_view(&self) -> Element<'_, Message> {
+        let mut column = widget::Column::new()
+            .push(widget::text::heading("Computers on your network"))
+            .spacing(6)
+            .width(Length::Fixed(520.0));
+        let entries = self.nearby.entries();
+        if entries.is_empty() {
+            column = column.push(widget::text::caption(
+                "None found yet. Farsight lists computers that announce themselves; to find the rest, \
+                 let it scan a network you own.",
+            ));
+        }
+        for NearbyEntry {
+            label,
+            address,
+            encryption,
+        } in entries
+        {
+            let security = match encryption {
+                Encryption::Offered => "encryption available",
+                Encryption::NotOffered => "NOT encrypted",
+                Encryption::Unknown => "not checked",
+            };
+            let name = if label.is_empty() {
+                address.display_name()
+            } else {
+                label.clone()
+            };
+            column = column.push(
+                widget::Row::new()
+                    .push(
+                        widget::text::body(format!(
+                            "{name} — {} · identity not verified · {security}",
+                            address.display_name()
+                        ))
+                        .width(Length::Fill),
+                    )
+                    .push(
+                        widget::button::text("Add")
+                            .on_press(Message::Nearby(NearbyMessage::Add(address.clone(), name))),
+                    )
+                    .push(widget::button::standard("Connect").on_press(Message::Pick(address)))
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+            );
+        }
+        let scan_controls: Element<'_, Message> = match (self.nearby.scan, self.network_trusted()) {
+            (Some(Scan::Running { done, total }), _) => widget::Row::new()
+                .push(widget::text::caption(format!("Scanning your network… {done} of {total}")))
+                .push(widget::button::text("Cancel").on_press(Message::Nearby(NearbyMessage::CancelScan)))
+                .spacing(8)
+                .into(),
+            (_, true) => widget::Row::new()
+                .push(widget::button::text("Scan again").on_press(Message::Nearby(NearbyMessage::Rescan)))
+                .push(widget::button::text("Stop scanning this network").on_press(Message::Nearby(NearbyMessage::ForgetNetwork)))
+                .spacing(8)
+                .into(),
+            (_, false) if self.network.is_some() => widget::Column::new()
+                .push(widget::text::caption(
+                    "To find computers that don't announce themselves, Farsight can briefly check each device on \
+                     this network for a VNC server. Only do this on a network you own: it never sends passwords, \
+                     but scanning other people's networks may break their rules.",
+                ))
+                .push(widget::button::standard("This is my network, scan it").on_press(Message::Nearby(NearbyMessage::TrustNetworkAndScan)))
+                .spacing(6)
+                .into(),
+            _ => widget::text::caption("Scanning isn't available on this network.").into(),
+        };
+        column = column.push(scan_controls);
+        if let Some(problem) = &self.nearby.problem {
+            column = column.push(widget::text::caption(problem.clone()));
+        }
+        column.into()
+    }
+
+    fn after_unlock(&mut self) -> Task<Message> {
+        self.screen = Screen::Connect;
+        self.scan_if_trusted();
+        match self.options.server.clone() {
+            Some(server) => self.start(server, self.options.allow_insecure),
+            None => Task::none(),
+        }
+    }
+
+    fn unlock_view(&self, creating: bool, error: Option<&str>) -> Element<'_, Message> {
+        let (title, body, action) = if creating {
+            (
+                "Protect your saved computers",
+                "Your desktop has no keyring, so Farsight needs a passphrase to encrypt the computers and \
+                 passwords you save. You'll enter it each time Farsight starts.",
+                "Create",
+            )
+        } else {
+            (
+                "Unlock saved computers",
+                "Enter the passphrase that protects your saved computers.",
+                "Unlock",
+            )
+        };
+        let mut column = widget::Column::new()
+            .push(widget::text::title3(title))
+            .push(widget::text::body(body).width(Length::Fixed(480.0)))
+            .push(
+                widget::secure_input("Passphrase", &self.passphrase_input, None, true)
+                    .on_input(Message::PassphraseChanged)
+                    .on_submit(|_| Message::Unlock)
+                    .width(Length::Fixed(320.0)),
+            )
+            .spacing(12)
+            .align_x(Alignment::Center);
+        if let Some(error) = error {
+            column = column.push(widget::text::body(error.to_owned()));
+        }
+        centred(
+            column.push(
+                widget::Row::new()
+                    .push(widget::button::standard("Skip for now").on_press(Message::SkipUnlock))
+                    .push(widget::button::suggested(action).on_press(Message::Unlock))
+                    .spacing(8),
+            ),
+        )
     }
 
     fn submit_credentials(&mut self) {
@@ -691,6 +930,7 @@ impl App {
                 .push(widget::text::heading("Your computers"))
                 .push(list);
         }
+        column = column.push(self.nearby_view());
         if let Some(problem) = self.store.problem() {
             column = column.push(widget::text::caption(problem.to_owned()));
         }

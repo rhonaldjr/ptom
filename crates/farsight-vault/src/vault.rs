@@ -13,7 +13,9 @@ use crate::error::VaultError;
 use crate::format::{self, Header};
 use crate::fsutil::{self, FsError, ReadError};
 use crate::key::{KeyMetadata, KeySource, VaultKey};
-use crate::model::{Contents, HistoryEntry, PinnedIdentity, SavedServer, ServerId, Timestamp};
+use crate::model::{
+    Contents, HistoryEntry, PinnedIdentity, SavedServer, ServerId, Timestamp, TrustedNetwork,
+};
 use crate::paths;
 
 /// The most history entries kept; the oldest are dropped first.
@@ -307,6 +309,42 @@ impl Vault {
     /// `last_connected_at`).
     pub fn clear_history(&mut self) {
         self.contents.history.clear();
+    }
+
+    /// Networks the user marked as their own.
+    #[must_use]
+    pub fn trusted_networks(&self) -> &[TrustedNetwork] {
+        &self.contents.trusted_networks
+    }
+
+    /// Whether active discovery may run on the network `id`.
+    #[must_use]
+    pub fn is_trusted_network(&self, id: &str) -> bool {
+        self.contents.trusted_networks.iter().any(|n| n.id == id)
+    }
+
+    /// Marks a network as the user's own (idempotent).
+    pub fn trust_network(
+        &mut self,
+        id: impl Into<String>,
+        label: impl Into<String>,
+        at: Timestamp,
+    ) {
+        let id = id.into();
+        if !self.is_trusted_network(&id) {
+            self.contents.trusted_networks.push(TrustedNetwork {
+                id,
+                label: label.into(),
+                added_at: at,
+            });
+        }
+    }
+
+    /// Forgets a trusted network. Returns whether it was trusted.
+    pub fn untrust_network(&mut self, id: &str) -> bool {
+        let before = self.contents.trusted_networks.len();
+        self.contents.trusted_networks.retain(|n| n.id != id);
+        before != self.contents.trusted_networks.len()
     }
 
     /// Saved servers whose label or host contains `query`, ignoring case,

@@ -234,6 +234,20 @@ pub(crate) struct Contents {
     pub(crate) servers: Vec<SavedServer>,
     #[serde(default)]
     pub(crate) history: Vec<HistoryEntry>,
+    #[serde(default)]
+    pub(crate) trusted_networks: Vec<TrustedNetwork>,
+}
+
+/// A network the user marked as their own, where active discovery may run
+/// (ADR-0012). Identified by an opaque id from `farsight-discovery`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrustedNetwork {
+    /// Opaque network identifier (hash of gateway MAC and subnet).
+    pub id: String,
+    /// Name shown to the user.
+    pub label: String,
+    /// When it was marked as trusted.
+    pub added_at: Timestamp,
 }
 
 /// `needle` must already be lower-cased.

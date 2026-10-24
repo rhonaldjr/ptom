@@ -3,7 +3,8 @@
 
 use farsight_client::{Fingerprint, IdentityKind, ServerAddress};
 use farsight_vault::{
-    IdentityKind as PinKind, KeyringKeySource, PinnedIdentity, SavedServer, Timestamp, Vault,
+    IdentityKind as PinKind, KeyringKeySource, PassphraseKeySource, PinnedIdentity, SavedServer,
+    Timestamp, Vault,
 };
 use secrecy::{ExposeSecret, SecretString};
 use tracing::warn;
@@ -33,10 +34,13 @@ pub struct Remember {
 pub struct Store {
     vault: Option<Vault>,
     problem: Option<String>,
+    /// The keyring couldn't open the vault; a passphrase may (ADR-0008, P-8).
+    locked: bool,
 }
 
 impl Store {
-    /// Opens (or creates) the vault with a key from the OS keyring.
+    /// Opens (or creates) the vault with a key from the OS keyring. If that
+    /// fails, the store is *locked* until [`Self::unlock`] or [`Self::skip`].
     pub fn open() -> Self {
         let opened = Vault::default_path()
             .and_then(|path| Vault::open_or_create(path, &KeyringKeySource::vault()));
@@ -44,17 +48,51 @@ impl Store {
             Ok(vault) => Self {
                 vault: Some(vault),
                 problem: None,
+                locked: false,
             },
             Err(error) => {
-                warn!(%error, "saved computers unavailable");
+                warn!(%error, "keyring could not open saved computers");
                 Self {
                     vault: None,
-                    problem: Some(format!(
-                        "Saved computers are unavailable ({error}). Connections still work, but nothing is remembered."
-                    )),
+                    problem: Some(error.to_string()),
+                    locked: true,
                 }
             }
         }
+    }
+
+    /// Whether saved computers wait for a passphrase.
+    pub fn locked(&self) -> bool {
+        self.locked
+    }
+
+    /// Whether a vault file already exists (unlock vs. create wording).
+    pub fn exists() -> bool {
+        Vault::default_path().is_ok_and(|p| p.exists())
+    }
+
+    /// Opens (or creates) the vault with a passphrase (Argon2id).
+    pub fn unlock(&mut self, passphrase: SecretString) -> Result<(), String> {
+        let opened = Vault::default_path()
+            .and_then(|path| Vault::open_or_create(path, &PassphraseKeySource::new(passphrase)));
+        match opened {
+            Ok(vault) => {
+                self.vault = Some(vault);
+                self.problem = None;
+                self.locked = false;
+                Ok(())
+            }
+            Err(error) => Err(match error {
+                farsight_vault::VaultError::WrongKey => "That passphrase is not right.".to_owned(),
+                other => format!("Couldn't open saved computers: {other}"),
+            }),
+        }
+    }
+
+    /// Continues without saved computers for this run.
+    pub fn skip(&mut self) {
+        self.locked = false;
+        self.problem = Some("Saved computers are locked for this session. Connections still work, but nothing is remembered.".into());
     }
 
     /// Why the vault is unavailable, if it is.
@@ -155,6 +193,57 @@ impl Store {
         }
         if let Err(error) = result.and_then(|()| vault.save()) {
             warn!(%error, "could not update saved computers");
+        }
+    }
+
+    /// Saves a discovered computer without connecting (VWR-17). Returns
+    /// false if it was already saved or the vault is unavailable.
+    pub fn add(&mut self, address: &ServerAddress, label: &str) -> bool {
+        if self.find(address).is_some() {
+            return false;
+        }
+        let Some(vault) = &mut self.vault else {
+            return false;
+        };
+        match SavedServer::new(label, address.host.clone(), address.port, Timestamp::now()) {
+            Ok(server) => {
+                vault.upsert_server(server);
+                if let Err(error) = vault.save() {
+                    warn!(%error, "could not save computer");
+                }
+                true
+            }
+            Err(error) => {
+                warn!(%error, "could not save computer");
+                false
+            }
+        }
+    }
+
+    /// Whether the user marked network `id` as their own (ADR-0012).
+    pub fn is_trusted_network(&self, id: &str) -> bool {
+        self.vault
+            .as_ref()
+            .is_some_and(|v| v.is_trusted_network(id))
+    }
+
+    /// Marks network `id` as the user's own.
+    pub fn trust_network(&mut self, id: &str) {
+        if let Some(vault) = &mut self.vault {
+            vault.trust_network(id, "My network", Timestamp::now());
+            if let Err(error) = vault.save() {
+                warn!(%error, "could not save the trusted network");
+            }
+        }
+    }
+
+    /// Stops automatic scanning on network `id`.
+    pub fn forget_network(&mut self, id: &str) {
+        if let Some(vault) = &mut self.vault {
+            vault.untrust_network(id);
+            if let Err(error) = vault.save() {
+                warn!(%error, "could not update trusted networks");
+            }
         }
     }
 

@@ -43,15 +43,16 @@ SEC-5, SEC-6, SEC-7, SEC-8, SEC-9, PRD-10, VWR-8, VWR-9, UTL-1
 - ☑ `farsight-vault` (ADR-0008) · connection history with search · `farsight-passwd` (ADR-0014)
 - ☑ **Conditions:** downgrade test (a pinned server offering only legacy security is refused) · secrets never logged (test)
 - Interop verified in CI against TigerVNC: VncAuth, None, X509Vnc, RA2 and RA2_256
-- Follow-ups: passphrase unlock screen when no keyring (P-8); manage saved computers (rename, forget) in the UI
+- Follow-ups: manage saved computers (rename, forget) in the UI. The passphrase unlock screen moved to M3.5 by user decision (P-8).
 
-## M3.5: Find any VNC server · [council](../council/2026-10-23-tray-and-discovery.md#b-discover-any-vnc-server-not-just-farsight-agents)
+## M3.5: Find any VNC server ☑ · [council](../council/2026-10-23-tray-and-discovery.md#b-discover-any-vnc-server-not-just-farsight-agents)
 PRD-4, VWR-13, VWR-16, VWR-17
-- "Computers on your network": passive `_rfb._tcp` browsing for **any** VNC server, always on
-- Active probing (banner and security types only, never auth) that runs automatically on networks the
+- ☑ "Computers on your network": passive `_rfb._tcp` browsing for **any** VNC server, always on
+- ☑ Active probing (banner and security types only, never auth) that runs automatically on networks the
   user marked "This is my network". The consent is stored in the vault per network and can be cleared (ADR-0012).
-- One-click **Add**, which creates a saved session without connecting. Entries show "Identity not verified" and an advisory "Not encrypted".
-- **Conditions:** fuzzed probe parser reusing the `farsight-rfb` decoders · Q2 test proving no bytes are sent after the
+- ☑ **Passphrase unlock** for saved computers when the desktop has no keyring (user decision on P-8, ADR-0008)
+- ☑ One-click **Add**, which creates a saved session without connecting. Entries show "Identity not verified" and an advisory "Not encrypted".
+- ☑ **Conditions:** fuzzed probe parser reusing the `farsight-rfb` decoders · Q2 test proving no bytes are sent after the
   security list · Q4 interop containers (TigerVNC, x11vnc, QEMU, mDNS advertiser) · advertised servers appear within 5 s,
   and an opted-in /24 scan finishes within 30 s · scope limited to local subnets, rate-limited · credentials keyed by verified identity
 

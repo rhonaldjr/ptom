@@ -35,6 +35,6 @@ pub use key::{
 pub use keyring::KeyringKeySource;
 pub use model::{
     HistoryEntry, IdentityKind, ParseServerIdError, PinnedIdentity, SavedServer, ServerId,
-    Timestamp,
+    Timestamp, TrustedNetwork,
 };
 pub use vault::{HISTORY_LIMIT, MAX_VAULT_FILE_LEN, Vault};

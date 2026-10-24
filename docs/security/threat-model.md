@@ -27,9 +27,9 @@ integrity · viewer host integrity · the local user's awareness that they are b
 | T1046 discovery recon / rogue-agent spoofing | Minimal TXT · unverified-until-fingerprint | M6 |
 | T1543.002 persistence via systemd | User units only · no root · documented | M4 |
 | Silent surveillance of the local user | Session-presence indicator that the remote side can't disable | M4 |
-| T1046 from our own prober (IDS alerts, AUP breach on foreign networks) | Active probing only on user-marked networks · local subnets only · rate-limited · banner only (ADR-0012) | M3.5 |
+| T1046 from our own prober (IDS alerts, AUP breach on foreign networks) | Active probing only on user-marked networks · local subnets only · rate-limited · banner only; fuzz-tested that only one version message is ever sent (ADR-0012) | M3.5 ✅ |
 | Spoofed discovered server harvests VncAuth responses (T1557/T1110) | Unverified until TOFU · credentials bound to verified identity, never IP · no auto-send | M3.5, M6 |
-| Malicious advertised names (bidi/control chars) in tray or list | Sanitise and length-cap before rendering | M3.5, M6 |
+| Malicious advertised names (bidi/control chars) in tray or list | `sanitize_name` strips control, bidi and invisible characters and caps length (fuzzed) | M3.5 ✅, M6 |
 | Supply-chain compromise | cargo-deny · provenance attestations · SHA-pinned actions | M0 |
 
 ## Accepted risks

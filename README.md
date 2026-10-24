@@ -7,9 +7,9 @@ connect to the VNC servers you already have, and it is built to replace TigerVNC
 usually miss: finding computers automatically, keeping several desktops open at once, and keeping your
 passwords safe.
 
-> **Project status: early development.** The **viewer works**, with **encrypted connections** and **saved
-> computers**. It connects to the VNC servers you already run (TigerVNC, x11vnc, and others). Finding computers
-> on your network automatically is next (milestone M3.5). See [what's coming](#whats-coming).
+> **Project status: early development.** The **viewer works**, with **encrypted connections**, **saved
+> computers** and **automatic discovery** of computers on your network. It connects to the VNC servers you
+> already run (TigerVNC, x11vnc, and others). Farsight's own server is next (M4). See [what's coming](#whats-coming).
 
 ---
 
@@ -40,7 +40,7 @@ Sharing and other VNC software.
 | ✅ M1 | The core VNC protocol, built and tested |
 | ✅ M2 | **First usable viewer:** connect to your existing VNC servers |
 | ✅ M3 | Secure connections and saved passwords |
-| M3.5 | Automatic discovery of the computers on your network |
+| ✅ M3.5 | Automatic discovery of the computers on your network |
 | M4 | Share your COSMIC / Wayland desktop |
 | M5 | Share your X11 desktop |
 | M6 | Tabs, windows and the tray icon |
@@ -73,6 +73,10 @@ farsight -ViewOnly pop-os:1   # watch without controlling
   server offers it (TigerVNC's X509 and RSA-AES modes). It asks before using an unencrypted connection on your network.
 - The first time you connect securely, Farsight shows the computer's **fingerprint** so you can check it, then
   remembers it. If it ever changes, Farsight warns you before anything is sent.
+- **Computers on your network** are listed automatically when they announce themselves. To find the rest,
+  click **This is my network, scan it** (once per network). Farsight then checks your own network for VNC
+  servers, without ever sending a password. Found computers show "identity not verified" until you connect.
+- If your desktop has no keyring, Farsight asks for a passphrase to protect your saved computers.
 - Computers you connect to are remembered and searchable from the connect screen. Tick **Remember on this computer**
   to save a password; it's stored encrypted, with the key in your system keyring.
 

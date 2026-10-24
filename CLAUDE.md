@@ -113,8 +113,10 @@ No local toolchain? `docker run --rm -v "$PWD":/w -w /w rust:latest cargo test -
   and how to use it. Technical detail belongs only in the "Build locally" and "Develop" sections.
   Deeper material goes in `docs/`.
 - **Every push to `main` produces a release**, so `main` must always be releasable. Commit on a
-  milestone branch (`m<N>/<slug>`). Merge to `main` only through PRs that pass `ci.yml`. Never push
-  to `main` without the user's go-ahead.
+  milestone branch (`m<N>/<slug>`). Merge to `main` only through PRs that pass `ci.yml`.
+- **Push each finished milestone branch to GitHub** (`git push -u origin m<N>/<slug>`) right after its
+  milestone commit (user instruction). Never push WIP commits. Never push to `main` without the
+  user's go-ahead, because that publishes a release.
 - The workspace version in `Cargo.toml` stays `0.0.0`. The release workflow stamps the real
   version from the tag. Do not hand-edit it.
 
