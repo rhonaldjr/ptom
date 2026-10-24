@@ -1,5 +1,5 @@
 [package]
-name = "ptom-fuzz"
+name = "farsight-fuzz"
 version = "0.0.0"
 edition = "2024"
 publish = false
@@ -13,8 +13,8 @@ members = ["."]
 
 [dependencies]
 libfuzzer-sys = "0.4"
-ptom-rfb = { path = "../crates/ptom-rfb" }
-ptom-security = { path = "../crates/ptom-security" }
+farsight-rfb = { path = "../crates/farsight-rfb" }
+farsight-security = { path = "../crates/farsight-security" }
 
 [[bin]]
 name = "rfb_version"

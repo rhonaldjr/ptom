@@ -2,7 +2,7 @@
 
 **Lens:** How will we know it works, keeps working, and works for users?
 
-## The quadrants for ptom
+## The quadrants for farsight
 | | Supports the team | Critiques the product |
 |---|---|---|
 | **Business-facing** | **Q2:** story acceptance tests, examples from the story map, protocol conformance scenarios | **Q3:** exploratory charters (flaky Wi-Fi, sleep/resume, HiDPI, multi-monitor), usability sessions, alpha users |

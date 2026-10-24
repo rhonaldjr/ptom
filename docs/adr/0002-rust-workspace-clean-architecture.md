@@ -4,7 +4,7 @@
 - **Requirements:** PRD-1, PRD-6, PRD-8, PRD-9, NET-6
 
 ## Context
-ptom has one protocol core and several faces: viewer, agent, password tool, and later a web
+Farsight has one protocol core and several faces: viewer, agent, password tool, and later a web
 gateway. It also has many interchangeable details: X11, Wayland portals, headless Smithay,
 rustls, libcosmic, mDNS. A memory-safe language is a security requirement for code that parses
 untrusted network input.
@@ -12,10 +12,10 @@ untrusted network input.
 ## Decision
 - Rust (edition 2024), in a single Cargo workspace. `unsafe_code = "forbid"` is set workspace-wide.
 - The layers, from innermost to outermost:
-  1. **Entities:** `ptom-rfb` (wire types, codec, sans-I/O state machines), `ptom-codec` (encodings).
-  2. **Use cases:** `ptom-security` (negotiation and auth logic), `ptom-client`, `ptom-server`. These own the **ports** (traits).
-  3. **Adapters:** `ptom-net`, `ptom-vault`, `ptom-discovery`, and later `ptom-capture-*` and `ptom-headless`.
-  4. **Frameworks/drivers:** `apps/ptom`, `apps/ptom-agent`, `apps/ptom-passwd`. These are composition roots only.
+  1. **Entities:** `farsight-rfb` (wire types, codec, sans-I/O state machines), `farsight-codec` (encodings).
+  2. **Use cases:** `farsight-security` (negotiation and auth logic), `farsight-client`, `farsight-server`. These own the **ports** (traits).
+  3. **Adapters:** `farsight-net`, `farsight-vault`, `farsight-discovery`, and later `farsight-capture-*` and `farsight-headless`.
+  4. **Frameworks/drivers:** `apps/farsight`, `apps/farsight-agent`, `apps/farsight-passwd`. These are composition roots only.
 - Dependencies point inward only. `scripts/check-layers.sh` enforces this in CI.
 - Protocol logic is **sans-I/O**: it takes bytes and events in and returns bytes and actions out.
   This lets the same core run over TCP, TLS, or the future WebSocket gateway, and makes it unit-testable without sockets.

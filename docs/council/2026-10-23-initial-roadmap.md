@@ -224,4 +224,5 @@ unresolved. A licensing review before enabling it in release builds becomes a bl
   and PO note that "peeping Tom" means a voyeur. On a remote-viewing tool, that harms trust from the people being
   viewed (PbD principle 7), distro and enterprise adoption, and searchability. CA, SE and QA have no stake.
   The binary name `ptom` is neutral. *Options:* keep it · rename the display name and keep `ptom` · rename both.
-- **E2. Anonymous-TLS VeNCrypt.** See M3 above. *Council leaning:* exclude it.
+  **User decision (2026-10-23): rename both, to Farsight.**
+- **E2. Anonymous-TLS VeNCrypt.** See M3 above. *Council leaning:* exclude it. **User decision (2026-10-23): excluded.**

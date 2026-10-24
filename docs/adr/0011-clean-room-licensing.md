@@ -4,7 +4,7 @@
 - **Requirements:** PRD-1
 
 ## Context
-ptom is MIT-licensed. TigerVNC, libvncserver, TightVNC and x11vnc are GPL.
+Farsight is MIT-licensed. TigerVNC, libvncserver, TightVNC and x11vnc are GPL.
 
 ## Decision
 - Implement from public specifications only: RFC 6143, the community RFB spec (rfbproto), RFC 8446 (TLS 1.3), and the relevant Wayland/portal protocol specs.

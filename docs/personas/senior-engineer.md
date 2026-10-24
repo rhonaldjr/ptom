@@ -2,7 +2,7 @@
 
 **Lens:** Can the next person read this, trust it and change it safely?
 
-## Principles applied to ptom
+## Principles applied to farsight
 - Meaningful names. Functions are small and do one thing at one level of abstraction.
 - No flag arguments. Prefer enums and newtypes (`Port`, `Rect`, `EncodingId`) over primitives.
 - Error handling is not an afterthought. Use `Result` with typed errors (`thiserror`), no

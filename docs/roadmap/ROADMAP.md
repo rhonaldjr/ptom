@@ -29,7 +29,7 @@ NET-1, NET-3, NET-4, NET-5, NET-6, ENC-1, ENC-2, SEC-1, SEC-2, SEC-3
 VWR-1, VWR-2, VWR-3, VWR-5, VWR-6, VWR-10, VWR-14, INP-1, INP-2, INP-5, ENC-5 (decode), ENC-6 (decode)
 - libcosmic viewer: connect, render, keyboard/mouse, clipboard, fullscreen/windowed, scaling, view-only
 - Decoders: Raw, CopyRect, Hextile, ZRLE, Tight (incl. JPEG)
-- TigerVNC-compatible CLI (`ptom host:display`, `-ViewOnly`, `-FullScreen`, …)
+- TigerVNC-compatible CLI (`farsight host:display`, `-ViewOnly`, `-FullScreen`, …)
 - **Conditions:** persistent encryption indicator · decoders fuzzed (malicious-server cases, API10)
   · TigerVNC server interop test in CI
 
@@ -37,22 +37,22 @@ VWR-1, VWR-2, VWR-3, VWR-5, VWR-6, VWR-10, VWR-14, INP-1, INP-2, INP-5, ENC-5 (d
 SEC-5, SEC-6, SEC-7, SEC-8, SEC-9, PRD-10, VWR-8, VWR-9, UTL-1
 - VeNCrypt X509None/X509Vnc/X509Plain over rustls · RA2/RA2ne/RA2_256
 - TOFU fingerprint pinning with a clear "identity changed" flow
-- `ptom-vault` (ADR-0008) · connection history with search · `ptom-passwd`
+- `farsight-vault` (ADR-0008) · connection history with search · `farsight-passwd`
 - **Conditions:** downgrade test (MITM strips VeNCrypt, so the viewer warns or refuses) · secrets never logged (test)
 
-## M3.5: Find any VNC server · [council](../council/2026-10-23-tray-and-discovery.md#b-discover-any-vnc-server-not-just-ptom-agents)
+## M3.5: Find any VNC server · [council](../council/2026-10-23-tray-and-discovery.md#b-discover-any-vnc-server-not-just-farsight-agents)
 PRD-4, VWR-13, VWR-16, VWR-17
 - "Computers on your network": passive `_rfb._tcp` browsing for **any** VNC server, always on
 - Active probing (banner and security types only, never auth) that runs automatically on networks the
   user marked "This is my network". The consent is stored in the vault per network and can be cleared (ADR-0012).
 - One-click **Add**, which creates a saved session without connecting. Entries show "Identity not verified" and an advisory "Not encrypted".
-- **Conditions:** fuzzed probe parser reusing the `ptom-rfb` decoders · Q2 test proving no bytes are sent after the
+- **Conditions:** fuzzed probe parser reusing the `farsight-rfb` decoders · Q2 test proving no bytes are sent after the
   security list · Q4 interop containers (TigerVNC, x11vnc, QEMU, mDNS advertiser) · advertised servers appear within 5 s,
   and an opted-in /24 scan finishes within 30 s · scope limited to local subnets, rate-limited · credentials keyed by verified identity
 
 ## M4: COSMIC / Wayland live-session agent · [council](../council/2026-10-23-initial-roadmap.md#m4-cosmic--wayland-agent)
 SRV-3, SRV-4, SRV-7, SRV-8, SRV-9, SRV-10, SRV-12, SEC-10, NET-2, NET-8 (view-only), ENC-1/2/5/6 (encode)
-- `ptom-agent --backend wayland`: portal ScreenCast/RemoteDesktop with PipeWire and libei. Targets COSMIC first, then GNOME and KDE.
+- `farsight-agent --backend wayland`: portal ScreenCast/RemoteDesktop with PipeWire and libei. Targets COSMIC first, then GNOME and KDE.
 - systemd user unit with ADR-0009 hardening · loopback-only default · access controls and auth rate limiting
 - Session-presence indicator plus "disconnect all" for the local user
 - **Conditions:** requires M3 (no off-loopback agent without encryption) · use cases tested via
@@ -61,7 +61,7 @@ SRV-3, SRV-4, SRV-7, SRV-8, SRV-9, SRV-10, SRV-12, SEC-10, NET-2, NET-8 (view-on
 
 ## M5: X11 agent (x0vncserver parity) · [council](../council/2026-10-23-initial-roadmap.md#m5-x11-agent)
 SRV-2, SRV-7 (XTest), SRV-10 (XDamage + polling)
-- `ptom-agent --backend x11` with an Xvfb-based integration test in CI
+- `farsight-agent --backend x11` with an Xvfb-based integration test in CI
 
 ## M6: Multi-session viewer, tray icon and agent advertising · [council](../council/2026-10-23-initial-roadmap.md#m6-multi-session--discovery) · [tray council](../council/2026-10-23-tray-and-discovery.md#a-viewer-tray-icon)
 PRD-3, VWR-12, VWR-15
@@ -74,8 +74,8 @@ PRD-3, VWR-12, VWR-15
 
 ## M7: Persistent headless desktops · [council](../council/2026-10-23-initial-roadmap.md#m7-headless-desktops)
 SRV-1, SRV-5, VWR-4, NET-8 (shared)
-- `ptom-headless` Smithay compositor plus Xwayland (ADR-0006) · ExtendedDesktopSize · multi-monitor layouts · shared sessions
-- socket activation · `ptom-agent@:N` units mirroring `vncserver@:N`
+- `farsight-headless` Smithay compositor plus Xwayland (ADR-0006) · ExtendedDesktopSize · multi-monitor layouts · shared sessions
+- socket activation · `farsight-agent@:N` units mirroring `vncserver@:N`
 - Becomes the CI compositor for end-to-end tests
 
 ## M8: Performance and full encodings · [council](../council/2026-10-23-initial-roadmap.md#m8-performance--encodings)
@@ -104,4 +104,3 @@ SRV-11, ENC-8
 - Privilege-separated agent (protocol process / capture process)
 - Greeter / login-screen access (needs a privileged, audited component)
 - Vault export / backup
-- Anonymous-TLS VeNCrypt (**E2**, awaiting the user)

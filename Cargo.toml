@@ -15,14 +15,14 @@ authors = ["Akrogoniaios Technologies Corp."]
 
 [workspace.dependencies]
 # Internal crates
-ptom-rfb = { path = "crates/ptom-rfb" }
-ptom-codec = { path = "crates/ptom-codec" }
-ptom-security = { path = "crates/ptom-security" }
-ptom-client = { path = "crates/ptom-client" }
-ptom-server = { path = "crates/ptom-server" }
-ptom-net = { path = "crates/ptom-net" }
-ptom-vault = { path = "crates/ptom-vault" }
-ptom-discovery = { path = "crates/ptom-discovery" }
+farsight-rfb = { path = "crates/farsight-rfb" }
+farsight-codec = { path = "crates/farsight-codec" }
+farsight-security = { path = "crates/farsight-security" }
+farsight-client = { path = "crates/farsight-client" }
+farsight-server = { path = "crates/farsight-server" }
+farsight-net = { path = "crates/farsight-net" }
+farsight-vault = { path = "crates/farsight-vault" }
+farsight-discovery = { path = "crates/farsight-discovery" }
 
 # External
 anyhow = "1"

@@ -1,20 +1,20 @@
-# ptom (Peepin Tom)
+# Farsight
 
 **See and control your other computers from wherever you are.**
 
-ptom is a free, open-source remote desktop app for Linux and macOS. It works with the VNC standard, so it can
+Farsight is a free, open-source remote desktop app for Linux and macOS. It works with the VNC standard, so it can
 connect to the VNC servers you already have, and it is built to replace TigerVNC. It adds the things people
 usually miss: finding computers automatically, keeping several desktops open at once, and keeping your
 passwords safe.
 
-> **Project status: early development.** The foundation is in place, but ptom can't connect to anything
+> **Project status: early development.** The foundation is in place, but farsight can't connect to anything
 > yet. The first usable version will be the viewer (milestone M2). See [what's coming](#whats-coming).
 
 ---
 
-## What ptom will do
+## What farsight will do
 
-**The viewer** (`ptom`): the app you use to see other computers
+**The viewer** (`farsight`): the app you use to see other computers
 - **Finds computers for you.** It lists the VNC servers on your home network automatically, including
   ones made by other software, and you add them with one click.
 - **Many desktops at once**, in tabs or in separate windows.
@@ -23,12 +23,12 @@ passwords safe.
 - **Shows clearly whether a connection is secure**, and warns you before you use an insecure one.
 - Full screen, scaling, clipboard sharing, multiple monitors, and view-only mode.
 
-**The agent** (`ptom-agent`): runs on the computer you want to reach
+**The agent** (`farsight-agent`): runs on the computer you want to reach
 - Shares your desktop on **Wayland or X11**, with COSMIC (Pop!_OS) first, then GNOME, KDE, Xfce and others.
 - Can also run **desktops that keep going in the background**, even when nobody is connected.
 - Runs as your normal user, never as an administrator, and lets the person at the screen see when someone is connected.
 
-**Works with what you already use.** ptom talks to TigerVNC, TightVNC, RealVNC, noVNC, macOS Screen
+**Works with what you already use.** farsight talks to TigerVNC, TightVNC, RealVNC, noVNC, macOS Screen
 Sharing and other VNC software.
 
 ## What's coming
@@ -56,7 +56,7 @@ Every update to the project publishes a new release on the
 - Linux (Intel/AMD 64-bit and ARM 64-bit)
 - macOS (Apple Silicon). The macOS viewer is supported, but Linux comes first.
 
-Download the file for your system, unpack it, and run `ptom`. Distribution packages (Pop!_OS/Ubuntu,
+Download the file for your system, unpack it, and run `farsight`. Distribution packages (Pop!_OS/Ubuntu,
 Fedora, Arch, Flatpak) are planned.
 
 > Until the first usable milestone, released programs only print their version.
@@ -95,4 +95,4 @@ docker run --rm -v "$PWD":/w -w /w rust:latest cargo test --workspace
 
 ## License
 
-MIT. ptom is written from scratch from the public VNC specification and contains no code from other VNC projects.
+MIT. Farsight is written from scratch from the public VNC specification and contains no code from other VNC projects.

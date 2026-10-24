@@ -2,7 +2,7 @@
 
 **Lens:** Does this solve a real problem for a real user, and is it the most valuable thing to do next?
 
-## Principles applied to ptom
+## Principles applied to farsight
 - **Design Thinking:** empathise, define, ideate, prototype, test. Start from the user's situation.
   Example: "I'm on the couch with a laptop and want my Pop!_OS desktop."
 - **Norman:** discoverability, affordances, signifiers, mapping, feedback, constraints and

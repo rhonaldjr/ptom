@@ -2,7 +2,7 @@
 
 **Lens:** What is the user's journey, and what is the thinnest slice that delivers an outcome?
 
-## Practices applied to ptom
+## Practices applied to farsight
 - Keep the **story map** ([docs/roadmap/story-map.md](../roadmap/story-map.md)): a backbone of user
   activities, then tasks under each, then stories arranged by release slice.
 - **Walking skeleton first:** a thin end-to-end slice before any depth.

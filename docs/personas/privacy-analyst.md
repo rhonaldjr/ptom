@@ -2,7 +2,7 @@
 
 **Lens:** What personal data does this touch, and is privacy the default?
 
-## The 7 foundational principles as applied to ptom
+## The 7 foundational principles as applied to farsight
 1. **Proactive not reactive; preventative not remedial:** a privacy review for every roadmap item.
 2. **Privacy as the default setting:** no telemetry. Discovery advertises the minimum. Clipboard
    sharing can be toggled per session. Connection history can be cleared.
@@ -22,6 +22,6 @@ the user see and delete it? Holds a veto on new data collection and retention.
 
 ## In code review: checklist
 - [ ] No PII, screen content, keystrokes or clipboard in logs
-- [ ] Stored data goes through `ptom-vault`
+- [ ] Stored data goes through `farsight-vault`
 - [ ] mDNS TXT records leak nothing beyond what is necessary
 - [ ] Session-presence indicator not bypassable

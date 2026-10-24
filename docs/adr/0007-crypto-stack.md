@@ -8,7 +8,7 @@
 - Primitives come from RustCrypto: `des` (VncAuth legacy only), `rsa`, `aes`/`aes-gcm`, `sha1`/`sha2`, `chacha20poly1305`, `argon2`.
 - **VeNCrypt X509\*** and **RA2/RA2_256** provide encrypted, server-authenticated sessions.
 - **Anonymous-TLS VeNCrypt types (TLSNone/TLSVnc/TLSPlain) are not supported.** rustls has no
-  anonymous DH, and those types cannot authenticate the server. *Pending user confirmation (E2).*
+  anonymous DH, and those types cannot authenticate the server. Confirmed by the user (E2).
 - No OpenSSL or GnuTLS dependency. `cargo-deny` bans `openssl-sys`.
 
 ## Consequences

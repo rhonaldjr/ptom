@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use ptom_rfb::PixelFormat;
+use farsight_rfb::PixelFormat;
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(format) = PixelFormat::decode(data) {

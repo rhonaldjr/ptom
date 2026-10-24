@@ -1,0 +1,15 @@
+[package]
+name = "farsight-net"
+description = "TCP/TLS transports for RFB connections"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+farsight-rfb.workspace = true
+
+[lints]
+workspace = true

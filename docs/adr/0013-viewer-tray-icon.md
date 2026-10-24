@@ -5,7 +5,7 @@
 - **Requirements:** VWR-15
 
 ## Decision
-- `ptom-client` owns a `StatusPresenter` port and a status view model listing saved sessions, open sessions,
+- `farsight-client` owns a `StatusPresenter` port and a status view model listing saved sessions, open sessions,
   discovered servers and their state. The main window and the tray render the **same** model. Every
   tray action also exists in the main window.
 - Linux adapter: **`ksni`** (pure-Rust StatusNotifierItem over D-Bus). It does not use `tray-icon`, which

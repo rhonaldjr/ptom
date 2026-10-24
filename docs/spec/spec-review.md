@@ -34,9 +34,11 @@ Review of the original brief. Each finding lists the resolution and who resolved
 | 18 | **A web interface over Tailscale** means a WebSocket transport, an authenticated gateway and SSRF concerns. | Sans-I/O core now. The gateway is a Horizon item and needs its own council session. |
 | 19 | **A release on every push** turns any bad merge into a published release. | Branch protection plus a mandatory CI gate. `main` is always releasable. |
 
-## Open questions for the user
+## Questions put to the user (resolved 2026-10-23)
 - **E1. Product name.** The README calls the app "Peepin Tom". The Privacy Analyst and Product Owner
   flag that "peeping Tom" means voyeur. On a remote-*viewing* tool, that may hurt distro inclusion,
   workplace adoption, and trust from the people being viewed. The binary name `ptom` is neutral either way.
+  **Resolved by the user: renamed to Farsight** (binaries `farsight`, `farsight-agent`, `farsight-passwd`).
 - **E2. Anonymous-TLS VeNCrypt.** Accept that ptom won't support it (council recommendation), or
   add an optional OpenSSL feature for maximum drop-in compatibility?
+  **Resolved by the user: not supported** ([ADR-0007](../adr/0007-crypto-stack.md)).

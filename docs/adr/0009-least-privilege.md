@@ -4,7 +4,7 @@
 - **Requirements:** PRD-8, SRV-4, SRV-7, SEC-10
 
 ## Decision
-- `ptom-agent` runs as the **desktop user** via a systemd **user** unit (`ptom-agent@.service`
+- `farsight-agent` runs as the **desktop user** via a systemd **user** unit (`farsight-agent@.service`
   in `~/.config/systemd/user`, or shipped in `/usr/lib/systemd/user`). It never runs as root and refuses to start as UID 0.
 - Hardening in units: `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=read-only`
   (except XDG dirs), `PrivateTmp=yes`, `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`,

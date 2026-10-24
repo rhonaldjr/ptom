@@ -2,7 +2,7 @@
 
 **Lens:** Can people use this without thinking about it?
 
-## The heuristics as applied to ptom
+## The heuristics as applied to farsight
 1. **Visibility of system status:** connection state, encryption status, latency/quality and
    view-only state are always visible, especially per tab.
 2. **Match with the real world:** say "Computers on your network", not "mDNS services".

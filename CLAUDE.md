@@ -1,10 +1,10 @@
-# CLAUDE.md — ptom (Peepin Tom)
+# CLAUDE.md — Farsight
 
-ptom is an open-source, memory-safe **drop-in replacement for TigerVNC**, written in Rust.
+Farsight is an open-source, memory-safe **drop-in replacement for TigerVNC**, written in Rust.
 It works on X11 and Wayland and adds features TigerVNC lacks: a multi-session viewer with tabs
 and windows, LAN discovery of agents, and an encrypted credential vault.
 
-- `ptom` is the viewer binary. `ptom-agent` is the server/agent. `ptom-passwd` is the password tool.
+- `farsight` is the viewer binary. `farsight-agent` is the server/agent. `farsight-passwd` is the password tool.
 - Licence: MIT. **Clean-room only.** Never copy, port or paraphrase code from TigerVNC,
   libvncserver, TightVNC or any other GPL VNC implementation. Work from RFC 6143 and the
   community RFB spec (https://github.com/rfbproto/rfbproto). See [ADR-0011](docs/adr/0011-clean-room-licensing.md).
@@ -22,6 +22,7 @@ and windows, LAN discovery of agents, and an encrypted credential vault.
 | Secrets | OS keyring plus an encrypted vault. Never store secrets in plaintext. | [0008](docs/adr/0008-secret-storage.md) |
 | Privilege | Agent runs as an unprivileged user service. Never as root. | [0009](docs/adr/0009-least-privilege.md) |
 | Discovery | mDNS / DNS-SD `_rfb._tcp` | [0010](docs/adr/0010-lan-discovery.md) |
+| Agent credentials | Argon2id user hashes; legacy VncAuth sealed in the keyring-backed vault; never write `~/.vnc/passwd` | [0014](docs/adr/0014-agent-credentials.md) |
 | Discovery of any VNC server | Passive mDNS always on; active probing only on user-marked networks | [0012](docs/adr/0012-active-rfb-probing.md) |
 | Viewer tray icon | `ksni` (SNI) on Linux, NSStatusItem on macOS, behind a port; no-host fallback | [0013](docs/adr/0013-viewer-tray-icon.md) |
 
@@ -31,28 +32,28 @@ Desktop priority order: **COSMIC (Pop!_OS)**, then GNOME (incl. Pop!_OS GNOME), 
 
 ```
 crates/            library crates, inner layers first
-  ptom-rfb         ENTITIES: RFB types, wire codec, state machines. Sans-I/O. No async, no OS.
-  ptom-codec       ENTITIES: pixel encodings (Raw, CopyRect, RRE, Hextile, ZRLE, Tight, JPEG, H.264)
-  ptom-security    ENTITIES/USE CASES: security-type negotiation, VncAuth, RA2, VeNCrypt logic
-  ptom-client      USE CASES: viewer session logic, plus ports (traits) the UI and net layers implement
-  ptom-server      USE CASES: agent session logic, plus ports (FrameSource, InputSink, Clipboard…)
-  ptom-net         ADAPTER: tokio TCP/TLS (rustls) transports, later WebSocket
-  ptom-vault       ADAPTER: encrypted credential/session store, OS keyring
-  ptom-discovery   ADAPTER: mDNS advertise/browse
+  farsight-rfb         ENTITIES: RFB types, wire codec, state machines. Sans-I/O. No async, no OS.
+  farsight-codec       ENTITIES: pixel encodings (Raw, CopyRect, RRE, Hextile, ZRLE, Tight, JPEG, H.264)
+  farsight-security    ENTITIES/USE CASES: security-type negotiation, VncAuth, RA2, VeNCrypt logic
+  farsight-client      USE CASES: viewer session logic, plus ports (traits) the UI and net layers implement
+  farsight-server      USE CASES: agent session logic, plus ports (FrameSource, InputSink, Clipboard…)
+  farsight-net         ADAPTER: tokio TCP/TLS (rustls) transports, later WebSocket
+  farsight-vault       ADAPTER: encrypted credential/session store, OS keyring
+  farsight-discovery   ADAPTER: mDNS advertise/browse
 apps/              FRAMEWORKS & DRIVERS (composition roots only; thin)
-  ptom             viewer (libcosmic)
-  ptom-agent       agent daemon
-  ptom-passwd      vncpasswd-compatible password tool
+  farsight             viewer (libcosmic)
+  farsight-agent       agent daemon
+  farsight-passwd      vncpasswd-compatible password tool
 docs/              ALL documentation (see docs/README.md)
 fuzz/              cargo-fuzz targets for every parser (own workspace, nightly)
 .github/workflows  ci.yml (PR gate), release.yml (push to main → release)
 ```
 
 **Dependency rule:** dependencies point inward only, so apps depend on adapters, which depend on
-use cases, which depend on entities. `ptom-rfb` and `ptom-codec` must not depend on tokio,
+use cases, which depend on entities. `farsight-rfb` and `farsight-codec` must not depend on tokio,
 any I/O crate, or any other workspace crate in an outer layer.
 `scripts/check-layers.sh` enforces this in CI.
-Platform capture/input adapters (`ptom-capture-wayland`, `ptom-capture-x11`, `ptom-headless`)
+Platform capture/input adapters (`farsight-capture-wayland`, `farsight-capture-x11`, `farsight-headless`)
 are added as crates in their roadmap milestones.
 
 ## Commands
@@ -105,7 +106,7 @@ No local toolchain? `docker run --rm -v "$PWD":/w -w /w rust:latest cargo test -
   Conventional Commit for the whole milestone. That commit ticks its boxes in
   [ROADMAP.md](docs/roadmap/ROADMAP.md). Squash any interim work commits into it.
 - **Update README.md when you complete a milestone**, in the same milestone commit. Write for users:
-  plain language, little jargon. Cover what ptom is, what works today, what's coming, how to install,
+  plain language, little jargon. Cover what farsight is, what works today, what's coming, how to install,
   and how to use it. Technical detail belongs only in the "Build locally" and "Develop" sections.
   Deeper material goes in `docs/`.
 - **Every push to `main` produces a release**, so `main` must always be releasable. Commit on a
@@ -128,6 +129,11 @@ subagent in `.claude/agents/`.
   Ethical Hacker review anything touching parsers, auth, crypto, networking, IPC or privilege.
 - **Architecture decisions** become ADRs in `docs/adr/` (copy `0000-template.md`, take the next number).
   Never edit an accepted ADR's decision. Supersede it with a new one.
+
+## Provisional decisions
+When a question comes up mid-build and the user hasn't answered within about 5 minutes (or isn't
+available), make the most conservative reasonable decision, log it in
+[docs/decisions/provisional.md](docs/decisions/provisional.md), and keep going. Never block a build on a question.
 
 ## Documentation
 

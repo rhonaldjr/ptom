@@ -52,6 +52,91 @@ dependencies = [
 ]
 
 [[package]]
+name = "farsight"
+version = "0.0.0"
+dependencies = [
+ "farsight-client",
+ "farsight-discovery",
+ "farsight-net",
+ "farsight-vault",
+]
+
+[[package]]
+name = "farsight-agent"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "farsight-discovery",
+ "farsight-net",
+ "farsight-server",
+ "rustix",
+]
+
+[[package]]
+name = "farsight-client"
+version = "0.0.0"
+dependencies = [
+ "farsight-codec",
+ "farsight-rfb",
+ "farsight-security",
+]
+
+[[package]]
+name = "farsight-codec"
+version = "0.0.0"
+dependencies = [
+ "farsight-rfb",
+]
+
+[[package]]
+name = "farsight-discovery"
+version = "0.0.0"
+
+[[package]]
+name = "farsight-net"
+version = "0.0.0"
+dependencies = [
+ "farsight-rfb",
+]
+
+[[package]]
+name = "farsight-passwd"
+version = "0.0.0"
+dependencies = [
+ "farsight-security",
+ "farsight-vault",
+]
+
+[[package]]
+name = "farsight-rfb"
+version = "0.0.0"
+dependencies = [
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "farsight-security"
+version = "0.0.0"
+dependencies = [
+ "farsight-rfb",
+ "proptest",
+]
+
+[[package]]
+name = "farsight-server"
+version = "0.0.0"
+dependencies = [
+ "farsight-codec",
+ "farsight-rfb",
+ "farsight-security",
+]
+
+[[package]]
+name = "farsight-vault"
+version = "0.0.0"
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -149,91 +234,6 @@ dependencies = [
  "tempfile",
  "unarray",
 ]
-
-[[package]]
-name = "ptom"
-version = "0.0.0"
-dependencies = [
- "ptom-client",
- "ptom-discovery",
- "ptom-net",
- "ptom-vault",
-]
-
-[[package]]
-name = "ptom-agent"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "ptom-discovery",
- "ptom-net",
- "ptom-server",
- "rustix",
-]
-
-[[package]]
-name = "ptom-client"
-version = "0.0.0"
-dependencies = [
- "ptom-codec",
- "ptom-rfb",
- "ptom-security",
-]
-
-[[package]]
-name = "ptom-codec"
-version = "0.0.0"
-dependencies = [
- "ptom-rfb",
-]
-
-[[package]]
-name = "ptom-discovery"
-version = "0.0.0"
-
-[[package]]
-name = "ptom-net"
-version = "0.0.0"
-dependencies = [
- "ptom-rfb",
-]
-
-[[package]]
-name = "ptom-passwd"
-version = "0.0.0"
-dependencies = [
- "ptom-security",
- "ptom-vault",
-]
-
-[[package]]
-name = "ptom-rfb"
-version = "0.0.0"
-dependencies = [
- "proptest",
- "thiserror",
-]
-
-[[package]]
-name = "ptom-security"
-version = "0.0.0"
-dependencies = [
- "proptest",
- "ptom-rfb",
-]
-
-[[package]]
-name = "ptom-server"
-version = "0.0.0"
-dependencies = [
- "ptom-codec",
- "ptom-rfb",
- "ptom-security",
-]
-
-[[package]]
-name = "ptom-vault"
-version = "0.0.0"
 
 [[package]]
 name = "quick-error"

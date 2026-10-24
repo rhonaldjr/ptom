@@ -1,4 +1,4 @@
-# ptom Requirements (baseline 2026-10-23)
+# farsight Requirements (baseline 2026-10-23)
 
 This is the original brief, normalised and given IDs so that roadmap items, stories and tests can
 reference it. Clarifications from the [spec review](spec-review.md) have been applied, and items
@@ -9,7 +9,7 @@ Each ID maps to a roadmap milestone in [ROADMAP.md](../roadmap/ROADMAP.md).
 - **PRD-1** Open-source (MIT), Rust, drop-in replacement for TigerVNC (CLI flags, `~/.vnc` / XDG config, systemd units, wire interop).
 - **PRD-2** Works on X11 and Wayland.
 - **PRD-3** Viewer stores multiple desktop sessions and opens them in tabs or separate windows.
-- **PRD-4** Viewer automatically discovers VNC servers on the home network (LAN/Wi-Fi): ptom agents **and any other RFB server**. It lists them and offers to add them ([ADR-0012](../adr/0012-active-rfb-probing.md)).
+- **PRD-4** Viewer automatically discovers VNC servers on the home network (LAN/Wi-Fi): farsight agents **and any other RFB server**. It lists them and offers to add them ([ADR-0012](../adr/0012-active-rfb-probing.md)).
 - **PRD-5** Desktop environments, in priority order: COSMIC (Pop!_OS, Rust COSMIC epoch), GNOME (incl. Pop!_OS GNOME), KDE Plasma, Xfce, others.
 - **PRD-6** Comprehensive automated testing: unit, property, fuzz, integration and interop.
 - **PRD-7** GitHub Actions cuts a versioned release on every push to `main` ([ADR-0005](../adr/0005-release-per-push.md)).
@@ -52,7 +52,7 @@ Each ID maps to a roadmap milestone in [ROADMAP.md](../roadmap/ROADMAP.md).
 - **SRV-1** Headless persistent desktops (Xvnc equivalent) using a Smithay headless compositor plus Xwayland ([ADR-0006](../adr/0006-headless-smithay.md))
 - **SRV-2** Share an existing X11 display (x0vncserver equivalent) with XDamage and a polling fallback
 - **SRV-3** Share an existing Wayland session (w0vncserver equivalent): xdg-desktop-portal ScreenCast/RemoteDesktop with PipeWire (GNOME, KDE, COSMIC), plus COSMIC/wlroots protocols where they are available
-- **SRV-4** systemd integration: `ptom-agent@.service` **user** units, socket activation
+- **SRV-4** systemd integration: `farsight-agent@.service` **user** units, socket activation
 - **SRV-5** Desktop resizing (ExtendedDesktopSize / SetDesktopSize) and multi-monitor layout
 - **SRV-6** Continuous updates mode
 - **SRV-7** Input injection: keyboard, mouse, extra buttons (XTest on X11; libei/portal RemoteDesktop on Wayland)
@@ -82,7 +82,7 @@ Each ID maps to a roadmap milestone in [ROADMAP.md](../roadmap/ROADMAP.md).
 - **INP-3** LED state sync · **INP-4** QEMU extended key events · **INP-5** View-only / ignore input
 
 ## Utilities (UTL)
-- **UTL-1** Password management (`ptom-passwd`, vault CLI) · **UTL-2** Runtime configuration (reload without restart)
+- **UTL-1** Password management (`farsight-passwd`, vault CLI) · **UTL-2** Runtime configuration (reload without restart)
 - **UTL-3** XDG Base Directory layout, plus reading legacy `~/.vnc/` · **UTL-4** Session-management and auth-setup tools
 
 ## Platform (PLT)

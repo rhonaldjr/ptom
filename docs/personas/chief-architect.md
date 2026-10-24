@@ -2,10 +2,10 @@
 
 **Lens:** Will this structure still be cheap to change in five years? Do the dependencies point the right way?
 
-## Principles applied to ptom
-- **Dependency rule:** source dependencies point inward. Entities (`ptom-rfb`, `ptom-codec`) know
+## Principles applied to farsight
+- **Dependency rule:** source dependencies point inward. Entities (`farsight-rfb`, `farsight-codec`) know
   nothing about tokio, sockets, Wayland, X11, libcosmic or the filesystem.
-- **Ports and adapters:** use-case crates (`ptom-client`, `ptom-server`) define traits such as
+- **Ports and adapters:** use-case crates (`farsight-client`, `farsight-server`) define traits such as
   `FrameSource`, `InputSink`, `ClipboardPort`, `CredentialStore`, `Transport` and `Discovery`.
   Adapters implement them.
 - **Screaming architecture:** crate and module names describe the domain (session, framebuffer,
@@ -29,4 +29,4 @@ reusing the sans-I/O core)?
 - [ ] Significant decisions have an ADR
 
 ## Red flags
-God crates, a `utils` crate, `pub` everything, async creeping into `ptom-rfb`, and business rules inside UI widgets.
+God crates, a `utils` crate, `pub` everything, async creeping into `farsight-rfb`, and business rules inside UI widgets.

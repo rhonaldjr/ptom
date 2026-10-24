@@ -8,7 +8,7 @@ TigerVNC's `Xvnc` is a complete X server with a built-in VNC server. Rewriting a
 impractical, and wrapping Xvfb puts large C codebases inside the trust boundary.
 
 ## Decision
-`ptom-agent --backend headless` runs an embedded **Smithay** compositor that renders off-screen
+`farsight-agent --backend headless` runs an embedded **Smithay** compositor that renders off-screen
 (GPU via GBM when available, otherwise pixman/software). It spawns the user's session
 (e.g. `cosmic-session`, `gnome-session` in headless mode, or a configured command) and runs
 **Xwayland** for X11 apps. Damage tracking comes from the compositor directly.
@@ -18,4 +18,4 @@ impractical, and wrapping Xvfb puts large C codebases inside the trust boundary.
 - Some desktops cannot run nested or headless under a foreign compositor. Each DE gets a
   compatibility row in the support matrix, and an "X11 headless via Xvfb" fallback can be
   proposed to the council later if needed.
-- Lives in a new crate, `ptom-headless` (adapter), added in its milestone.
+- Lives in a new crate, `farsight-headless` (adapter), added in its milestone.

@@ -1,4 +1,4 @@
-# ptom documentation
+# farsight documentation
 
 | Area | Contents |
 |---|---|
@@ -11,5 +11,6 @@
 | [personas/](personas/README.md) | The nine council and review personas |
 | [process/roadmap-council.md](process/roadmap-council.md) | How items enter the roadmap (max 3 debate rounds, then escalate) |
 | [process/code-review.md](process/code-review.md) | Which personas review which changes |
+| [decisions/provisional.md](decisions/provisional.md) | Provisional decisions made during implementation, awaiting user review |
 | [security/threat-model.md](security/threat-model.md) | Threat model and accepted risks |
 | [testing/](testing/README.md) | Test strategy and exploratory charters |
