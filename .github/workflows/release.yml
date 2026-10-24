@@ -77,10 +77,15 @@ jobs:
           for bin in $BINS; do cp "target/$TARGET/release/$bin" "dist/$name/"; done
           cp LICENSE README.md "dist/$name/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
+      - name: Debian packages (farsight viewer, farsight-agent server)
+        if: runner.os == 'Linux'
+        run: scripts/build-deb.sh "$VERSION" "target/$TARGET/release" dist
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: dist/*.tar.gz
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
 
   publish:
     needs: [version, build]
@@ -100,7 +105,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Checksums
-        run: cd dist && sha256sum *.tar.gz > SHA256SUMS
+        run: cd dist && sha256sum *.tar.gz *.deb > SHA256SUMS
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/*
@@ -118,4 +123,5 @@ jobs:
           make_latest: true
           files: |
             dist/*.tar.gz
+            dist/*.deb
             dist/SHA256SUMS

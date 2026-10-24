@@ -57,8 +57,15 @@ Every update to the project publishes a new release on the
 - Linux (Intel/AMD 64-bit and ARM 64-bit)
 - macOS (Apple Silicon). The macOS viewer is supported, but Linux comes first.
 
-Download the file for your system, unpack it, and run `farsight`. Distribution packages (Pop!_OS/Ubuntu,
-Fedora, Arch, Flatpak) are planned.
+**Pop!_OS / Ubuntu (22.04 or newer):** download the `.deb` files and install them:
+
+```bash
+sudo apt install ./farsight_*_amd64.deb          # the viewer (connect to other computers)
+sudo apt install ./farsight-agent_*_amd64.deb    # the agent (share this computer)
+```
+
+Use the `arm64` files on ARM computers. **Other Linux and macOS:** download the `.tar.gz` file for your system,
+unpack it, and run `farsight`. Fedora, Arch and Flatpak packages are planned.
 
 ## Use the viewer
 

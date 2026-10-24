@@ -30,6 +30,7 @@ Each item below is a checkbox: ticked means built, tested and committed.
 - [x] Cargo workspace, layered crates, workspace lints (`unsafe_code = forbid`)
 - [x] CLAUDE.md, personas, council process, ADRs 0001–0011
 - [x] CI gate (fmt, clippy, test, deny, layer check) and release-per-push workflow
+- [x] `.deb` packages in every release: `farsight` (viewer) and `farsight-agent` (agent, `farsight-passwd`, systemd user unit), amd64 and arm64 (user request, P-35)
 - [x] `cargo-fuzz` harness with targets for the version, pixel-format and security-selection code, plus a CI smoke run
 - ⚠ **User action:** enable branch protection on `main` (require CI and one review). This is a repository setting, not code.
 
