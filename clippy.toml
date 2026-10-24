@@ -1,0 +1,6 @@
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+# Protocol/product names used in prose, not code identifiers.
+doc-valid-idents = ["VeNCrypt", "VncAuth", "TightVNC", "CopyRect", "TigerVNC", "RealVNC", "noVNC", ".."]

@@ -1,0 +1,115 @@
+# Every push to main cuts a versioned release (ADR-0005).
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Serialise releases so version computation never races. A push that arrives
+# while another is queued supersedes it; its commits ship in the next release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  version:
+    needs: ci
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+      - id: next
+        run: |
+          version="$(git cliff --bumped-version)"
+          echo "version=${version#v}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, bins: "ptom ptom-agent ptom-passwd", tier: 1 }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, bins: "ptom ptom-agent ptom-passwd", tier: 1 }
+          - { os: macos-latest, target: aarch64-apple-darwin, bins: "ptom ptom-passwd", tier: 2 }
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.tier == 2 }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TARGET: ${{ matrix.target }}
+      BINS: ${{ matrix.bins }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Stamp version
+        run: |
+          perl -0pi -e 's/^version = "0\.0\.0"/version = "$ENV{VERSION}"/m' Cargo.toml
+          cargo update --workspace
+      - name: Build
+        run: cargo build --release --locked --target "$TARGET" $(printf -- '-p %s ' $BINS)
+      - name: Package
+        run: |
+          name="ptom-${VERSION}-${TARGET}"
+          mkdir -p "dist/$name"
+          for bin in $BINS; do cp "target/$TARGET/release/$bin" "dist/$name/"; done
+          cp LICENSE README.md "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*.tar.gz
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum *.tar.gz > SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+      - name: Release notes
+        run: git cliff --unreleased --tag "v$VERSION" --strip all > RELEASE_NOTES.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: ptom v${{ env.VERSION }}
+          body_path: RELEASE_NOTES.md
+          make_latest: true
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS

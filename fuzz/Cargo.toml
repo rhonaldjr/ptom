@@ -1,0 +1,38 @@
+[package]
+name = "ptom-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Separate workspace: built with nightly by cargo-fuzz, outside the layer check.
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+ptom-rfb = { path = "../crates/ptom-rfb" }
+ptom-security = { path = "../crates/ptom-security" }
+
+[[bin]]
+name = "rfb_version"
+path = "fuzz_targets/rfb_version.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rfb_pixel_format"
+path = "fuzz_targets/rfb_pixel_format.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "security_select"
+path = "fuzz_targets/security_select.rs"
+test = false
+doc = false
+bench = false

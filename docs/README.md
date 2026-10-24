@@ -1,0 +1,15 @@
+# ptom documentation
+
+| Area | Contents |
+|---|---|
+| [spec/requirements.md](spec/requirements.md) | Normalised requirements with IDs |
+| [spec/spec-review.md](spec/spec-review.md) | Review of the original brief: contradictions, risks, open questions |
+| [roadmap/ROADMAP.md](roadmap/ROADMAP.md) | Council-approved milestones |
+| [roadmap/story-map.md](roadmap/story-map.md) | User story map (backbone and release slices) |
+| [council/](council/) | Roadmap council session records |
+| [adr/](adr/) | Architecture Decision Records (start from `0000-template.md`) |
+| [personas/](personas/README.md) | The nine council and review personas |
+| [process/roadmap-council.md](process/roadmap-council.md) | How items enter the roadmap (max 3 debate rounds, then escalate) |
+| [process/code-review.md](process/code-review.md) | Which personas review which changes |
+| [security/threat-model.md](security/threat-model.md) | Threat model and accepted risks |
+| [testing/](testing/README.md) | Test strategy and exploratory charters |

@@ -1,0 +1,50 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*"]
+exclude = ["fuzz"]
+
+[workspace.package]
+# Stamped from the git tag by .github/workflows/release.yml (ADR-0005). Do not edit by hand.
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+repository = "https://github.com/rhonaldjr/ptom"
+authors = ["Akrogoniaios Technologies Corp."]
+
+[workspace.dependencies]
+# Internal crates
+ptom-rfb = { path = "crates/ptom-rfb" }
+ptom-codec = { path = "crates/ptom-codec" }
+ptom-security = { path = "crates/ptom-security" }
+ptom-client = { path = "crates/ptom-client" }
+ptom-server = { path = "crates/ptom-server" }
+ptom-net = { path = "crates/ptom-net" }
+ptom-vault = { path = "crates/ptom-vault" }
+ptom-discovery = { path = "crates/ptom-discovery" }
+
+# External
+anyhow = "1"
+rustix = { version = "1", features = ["process"] }
+thiserror = "2"
+proptest = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "warn"
+cast_possible_truncation = "deny"
+dbg_macro = "deny"
+todo = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
