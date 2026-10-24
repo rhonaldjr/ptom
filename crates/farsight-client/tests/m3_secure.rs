@@ -264,6 +264,47 @@ fn vencrypt_x509_plain_asks_identity_then_credentials_then_connects_encrypted() 
     )));
 }
 
+/// Regression (TigerVNC 1.15 interop): with TLS 1.3 the server sends its
+/// VncAuth challenge as soon as TLS is up, while the user is still checking
+/// the certificate. Those bytes came through TLS and must be accepted once
+/// the identity is confirmed, not rejected as plaintext injection.
+#[test]
+fn server_data_that_arrives_during_the_identity_check_is_kept() {
+    let mut session = Session::new(SessionConfig {
+        password: Some(secret("pw")),
+        ..network()
+    });
+    let mut events = Vec::new();
+    // What TigerVNC sends before TLS: version, VeNCrypt, its version 0.2,
+    // "ok" plus one subtype (X509Vnc = 261), then "subtype accepted".
+    let mut feed = |session: &mut Session, bytes: &[u8]| {
+        session.receive(bytes);
+        events.extend(session.poll().unwrap());
+        session.take_output();
+    };
+    feed(&mut session, b"RFB 003.008\n");
+    feed(&mut session, &[1, 19]);
+    feed(&mut session, &[0, 2]);
+    feed(&mut session, &[0, 1, 0, 0, 1, 5]);
+    feed(&mut session, &[1]);
+    assert!(events.contains(&SessionEvent::TransportUpgrade(TransportUpgrade::Tls)));
+    assert!(
+        session
+            .tls_established(CERT_FINGERPRINT, false)
+            .unwrap()
+            .is_some()
+    );
+    // The challenge arrives (over TLS) before the user decides.
+    session.receive(&[9; 16]);
+    session.confirm_identity().unwrap();
+    session.poll().unwrap();
+    assert_eq!(
+        session.take_output().len(),
+        16,
+        "the VncAuth response is sent"
+    );
+}
+
 #[test]
 fn pinned_certificate_skips_the_identity_prompt() {
     let config = SessionConfig {

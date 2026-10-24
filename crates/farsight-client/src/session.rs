@@ -163,7 +163,15 @@ pub struct Session {
     encrypted: bool,
     presented_identity: Option<(IdentityKind, Fingerprint)>,
     last_clipboard: Option<String>,
+    /// Bytes that arrived over TLS while the user was still checking the
+    /// server's identity. They are protected, but the connection hasn't been
+    /// told about the upgrade yet, so they wait here until it has.
+    held_after_upgrade: Vec<u8>,
 }
+
+/// Most bytes held back while waiting for an identity decision (the server
+/// has nothing to say yet beyond a challenge, so this is generous).
+const MAX_HELD_AFTER_UPGRADE: usize = 64 * 1024;
 
 impl Session {
     /// Starts a session; feed it the server's bytes.
@@ -183,6 +191,7 @@ impl Session {
             encrypted: false,
             presented_identity: None,
             last_clipboard: None,
+            held_after_upgrade: Vec::new(),
         }
     }
 
@@ -235,6 +244,13 @@ impl Session {
 
     /// Appends bytes received from the server.
     pub fn receive(&mut self, bytes: &[u8]) {
+        if matches!(self.pending, Some(Pending::TlsIdentity)) {
+            // Over the cap the extra bytes are dropped, so the handshake fails
+            // safely rather than buffering without limit.
+            let room = MAX_HELD_AFTER_UPGRADE.saturating_sub(self.held_after_upgrade.len());
+            self.held_after_upgrade.extend(bytes.iter().take(room));
+            return;
+        }
         self.connection.receive(bytes);
     }
 
@@ -304,7 +320,10 @@ impl Session {
             Some(Pending::TlsIdentity) => {
                 self.status = SessionStatus::Handshaking;
                 self.encrypted = true;
-                self.connection.transport_upgraded()
+                self.connection.transport_upgraded()?;
+                let held = std::mem::take(&mut self.held_after_upgrade);
+                self.connection.receive(&held);
+                Ok(())
             }
             other => {
                 self.pending = other;

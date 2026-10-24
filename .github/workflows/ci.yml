@@ -124,7 +124,8 @@ jobs:
         run: |
           status=0
           for target in $(cargo +nightly fuzz list); do
-            if ! cargo +nightly fuzz run "$target" -- -max_total_time=30 > "/tmp/$target.log" 2>&1; then
+            # The prebuilt cargo-fuzz is a musl build and would default to musl, which ASan cannot use.
+            if ! cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" -- -max_total_time=30 > "/tmp/$target.log" 2>&1; then
               status=1
               cat "/tmp/$target.log"
               # Annotations are readable without a login, which helps remote triage.
