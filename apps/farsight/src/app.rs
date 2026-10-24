@@ -12,12 +12,15 @@ use cosmic::iced::{Alignment, Length, Point, Size, Subscription, event, mouse, w
 use cosmic::prelude::*;
 use cosmic::widget::{self, image};
 use cosmic::{executor, iced};
-use farsight_client::{ServerAddress, SessionConfig, SessionEvent, ViewerOptions};
+use farsight_client::{
+    Fingerprint, IdentityKind, ServerAddress, SessionConfig, SessionEvent, ViewerOptions,
+};
 use farsight_net::{Command, ConnectionHandle, CursorImage, Update};
 use farsight_rfb::SecurityType;
 use secrecy::SecretString;
 
 use crate::keymap;
+use crate::store::{Entry, Remember, Store};
 
 /// Keysyms sent by the "Send Ctrl+Alt+Del" menu entry.
 const CTRL_ALT_DEL: [u32; 3] = [0xffe3, 0xffe9, 0xffff];
@@ -30,7 +33,14 @@ const PIXELS_PER_NOTCH: f32 = 50.0;
 enum Screen {
     Connect,
     Connecting,
-    Password,
+    Credentials {
+        username: bool,
+    },
+    Identity {
+        fingerprint: Fingerprint,
+        kind: IdentityKind,
+        changed: bool,
+    },
     InsecureWarning(SecurityType),
     Desktop,
     Failed(String),
@@ -47,6 +57,7 @@ struct ConnectRequest {
     quality: Option<u8>,
     compress: Option<u8>,
     allow_insecure: bool,
+    pinned: Option<Fingerprint>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,9 +72,14 @@ pub enum Message {
     AddressChanged(String),
     Connect,
     BackToStart,
+    Pick(ServerAddress),
+    UsernameChanged(String),
     PasswordChanged(String),
     TogglePasswordVisibility,
-    SubmitPassword,
+    ToggleRemember(bool),
+    SubmitCredentials,
+    AcknowledgeChange(bool),
+    TrustIdentity,
     AcceptInsecure,
     Net(Net),
     Key {
@@ -106,8 +122,15 @@ pub struct App {
     options: ViewerOptions,
     screen: Screen,
     address_input: String,
+    username_input: String,
     password_input: String,
     password_hidden: bool,
+    remember: bool,
+    change_acknowledged: bool,
+    store: Store,
+    target: Option<ServerAddress>,
+    stored_credentials: Option<Remember>,
+    pending_remember: Option<Remember>,
     request: Option<ConnectRequest>,
     attempts: u64,
     handle: Option<ConnectionHandle>,
@@ -152,8 +175,15 @@ impl cosmic::Application for App {
             full_screen: options.full_screen,
             options,
             screen: Screen::Connect,
+            username_input: String::new(),
             password_input: String::new(),
             password_hidden: true,
+            remember: false,
+            change_acknowledged: false,
+            store: Store::open(),
+            target: None,
+            stored_credentials: None,
+            pending_remember: None,
             request: None,
             attempts: 0,
             handle: None,
@@ -198,11 +228,15 @@ impl cosmic::Application for App {
                 Err(e) => self.screen = Screen::Failed(e.to_string()),
             },
             Message::BackToStart | Message::Disconnect => return self.disconnect(),
+            Message::Pick(address) => return self.start(address, self.options.allow_insecure),
+            Message::UsernameChanged(text) => self.username_input = text,
             Message::PasswordChanged(text) => self.password_input = text,
             Message::TogglePasswordVisibility => self.password_hidden = !self.password_hidden,
-            Message::SubmitPassword => {
-                let password = SecretString::from(std::mem::take(&mut self.password_input));
-                self.command(Command::Password(password));
+            Message::ToggleRemember(remember) => self.remember = remember,
+            Message::SubmitCredentials => self.submit_credentials(),
+            Message::AcknowledgeChange(acknowledged) => self.change_acknowledged = acknowledged,
+            Message::TrustIdentity => {
+                self.command(Command::ConfirmIdentity);
                 self.screen = Screen::Connecting;
             }
             Message::AcceptInsecure => {
@@ -298,7 +332,12 @@ impl cosmic::Application for App {
                     .spacing(12)
                     .align_x(Alignment::Center),
             ),
-            Screen::Password => self.password_view(),
+            Screen::Credentials { username } => self.credentials_view(*username),
+            Screen::Identity {
+                fingerprint,
+                kind,
+                changed,
+            } => self.identity_view(fingerprint, *kind, *changed),
             Screen::InsecureWarning(security) => insecure_view(*security),
             Screen::Failed(reason) => centred(
                 widget::Column::new()
@@ -337,7 +376,27 @@ impl App {
     fn start(&mut self, address: ServerAddress, allow_insecure: bool) -> Task<Message> {
         self.attempts += 1;
         self.address_input = address.display_name();
+        let known = self.store.lookup(&address);
+        self.stored_credentials = known.password.map(|password| Remember {
+            username: known.username,
+            password,
+        });
+        if let (None, Some(path)) = (&self.stored_credentials, &self.options.password_file) {
+            match farsight_vault::legacy::read_legacy_passwd(path) {
+                Ok(password) => {
+                    self.stored_credentials = Some(Remember {
+                        username: None,
+                        password,
+                    });
+                }
+                Err(error) => tracing::warn!(%error, "could not read the password file"),
+            }
+        }
+        self.target = Some(address.clone());
+        self.pending_remember = None;
+        self.change_acknowledged = false;
         self.request = Some(ConnectRequest {
+            pinned: known.pinned,
             attempt: self.attempts,
             host: address.host,
             port: address.port,
@@ -351,8 +410,24 @@ impl App {
         Task::none()
     }
 
+    fn submit_credentials(&mut self) {
+        let username = (!self.username_input.is_empty())
+            .then(|| SecretString::from(self.username_input.clone()));
+        let password = SecretString::from(std::mem::take(&mut self.password_input));
+        if self.remember {
+            self.pending_remember = Some(Remember {
+                username: username.clone(),
+                password: password.clone(),
+            });
+        }
+        self.command(Command::Credentials { username, password });
+        self.screen = Screen::Connecting;
+    }
+
     fn disconnect(&mut self) -> Task<Message> {
         self.command(Command::Disconnect);
+        self.stored_credentials = None;
+        self.pending_remember = None;
         self.request = None;
         self.handle = None;
         self.connected = None;
@@ -405,7 +480,26 @@ impl App {
 
     fn on_session_event(&mut self, event: SessionEvent) -> Task<Message> {
         match event {
-            SessionEvent::PasswordRequired => self.screen = Screen::Password,
+            SessionEvent::CredentialsRequired { username } => {
+                // Use remembered credentials once; ask if they were refused.
+                if let Some(Remember { username, password }) = self.stored_credentials.take() {
+                    self.command(Command::Credentials { username, password });
+                } else {
+                    self.screen = Screen::Credentials { username };
+                }
+            }
+            SessionEvent::IdentityConfirmationRequired {
+                fingerprint,
+                kind,
+                changed,
+            } => {
+                self.change_acknowledged = false;
+                self.screen = Screen::Identity {
+                    fingerprint,
+                    kind,
+                    changed,
+                };
+            }
             SessionEvent::InsecureConsentRequired { security } => {
                 self.screen = Screen::InsecureWarning(security);
             }
@@ -413,8 +507,13 @@ impl App {
                 name,
                 security,
                 encrypted,
+                identity,
                 ..
             } => {
+                if let Some(address) = &self.target {
+                    self.store
+                        .remember(address, &name, identity, self.pending_remember.take());
+                }
                 self.connected = Some(Connected {
                     name,
                     security,
@@ -425,7 +524,8 @@ impl App {
                 return Task::batch([self.update_title(), full_screen]);
             }
             SessionEvent::Clipboard(text) => return iced::clipboard::write(text),
-            SessionEvent::Damaged(_)
+            SessionEvent::TransportUpgrade(_)
+            | SessionEvent::Damaged(_)
             | SessionEvent::Resized { .. }
             | SessionEvent::UpdateComplete
             | SessionEvent::CursorChanged
@@ -553,31 +653,67 @@ impl App {
     }
 
     fn connect_view(&self) -> Element<'_, Message> {
-        centred(
-            widget::Column::new()
-                .push(widget::text::title2("Connect to a computer"))
-                .push(widget::text::body(
-                    "Enter its name or address, for example pop-os:1 or 192.168.1.20",
-                ))
-                .push(
-                    widget::text_input("Computer", &self.address_input)
-                        .on_input(Message::AddressChanged)
-                        .on_submit(|_| Message::Connect)
-                        .width(Length::Fixed(360.0)),
-                )
-                .push(widget::button::suggested("Connect").on_press(Message::Connect))
-                .spacing(12)
-                .align_x(Alignment::Center),
-        )
+        let mut column = widget::Column::new()
+            .push(widget::text::title2("Connect to a computer"))
+            .push(widget::text::body(
+                "Enter its name or address, for example pop-os:1 or 192.168.1.20",
+            ))
+            .push(
+                widget::search_input("Computer", &self.address_input)
+                    .on_input(Message::AddressChanged)
+                    .on_submit(|_| Message::Connect)
+                    .width(Length::Fixed(360.0)),
+            )
+            .push(widget::button::suggested("Connect").on_press(Message::Connect))
+            .spacing(12)
+            .align_x(Alignment::Center);
+        let entries = self.store.search(&self.address_input);
+        if !entries.is_empty() {
+            let mut list = widget::Column::new().spacing(4).width(Length::Fixed(360.0));
+            for Entry {
+                label,
+                address,
+                saved,
+            } in entries
+            {
+                let text = if saved {
+                    format!("{label} — {}", address.display_name())
+                } else {
+                    format!("{} (recent)", address.display_name())
+                };
+                list = list.push(
+                    widget::button::text(text)
+                        .on_press(Message::Pick(address))
+                        .width(Length::Fill),
+                );
+            }
+            column = column
+                .push(widget::text::heading("Your computers"))
+                .push(list);
+        }
+        if let Some(problem) = self.store.problem() {
+            column = column.push(widget::text::caption(problem.to_owned()));
+        }
+        centred(column)
     }
 
-    fn password_view(&self) -> Element<'_, Message> {
+    fn credentials_view(&self, username: bool) -> Element<'_, Message> {
+        let mut column = widget::Column::new()
+            .push(widget::text::title3(format!(
+                "Sign in to {}",
+                self.address_input
+            )))
+            .spacing(12)
+            .align_x(Alignment::Center);
+        if username {
+            column = column.push(
+                widget::text_input("Username", &self.username_input)
+                    .on_input(Message::UsernameChanged)
+                    .width(Length::Fixed(320.0)),
+            );
+        }
         centred(
-            widget::Column::new()
-                .push(widget::text::title3(format!(
-                    "Password for {}",
-                    self.address_input
-                )))
+            column
                 .push(
                     widget::secure_input(
                         "Password",
@@ -586,20 +722,99 @@ impl App {
                         self.password_hidden,
                     )
                     .on_input(Message::PasswordChanged)
-                    .on_submit(|_| Message::SubmitPassword)
+                    .on_submit(|_| Message::SubmitCredentials)
                     .width(Length::Fixed(320.0)),
+                )
+                .push(
+                    widget::checkbox(self.remember)
+                        .label("Remember on this computer")
+                        .on_toggle(Message::ToggleRemember),
                 )
                 .push(
                     widget::Row::new()
                         .push(widget::button::standard("Cancel").on_press(Message::BackToStart))
                         .push(
-                            widget::button::suggested("Connect").on_press(Message::SubmitPassword),
+                            widget::button::suggested("Connect")
+                                .on_press(Message::SubmitCredentials),
                         )
                         .spacing(8),
-                )
-                .spacing(12)
-                .align_x(Alignment::Center),
+                ),
         )
+    }
+
+    fn identity_view(
+        &self,
+        fingerprint: &Fingerprint,
+        kind: IdentityKind,
+        changed: bool,
+    ) -> Element<'_, Message> {
+        let what = match kind {
+            IdentityKind::Certificate => "certificate",
+            IdentityKind::RsaKey => "key",
+        };
+        let (title, explanation) = if changed {
+            (
+                "This computer's identity has changed",
+                format!(
+                    "The {what} that {} presented is not the one you trusted before. This happens after a \
+                     reinstall, but it is also exactly what an attacker intercepting the connection looks like. \
+                     Nothing has been sent yet.",
+                    self.address_input
+                ),
+            )
+        } else {
+            (
+                "Is this the right computer?",
+                format!(
+                    "This is the first encrypted connection to {}. Check that the fingerprint below matches \
+                     the one shown on that computer, then trust it. Farsight will remember it.",
+                    self.address_input
+                ),
+            )
+        };
+        let mut column = widget::Column::new()
+            .push(
+                widget::icon::from_name(if changed {
+                    "dialog-warning-symbolic"
+                } else {
+                    "security-high-symbolic"
+                })
+                .size(48),
+            )
+            .push(widget::text::title3(title))
+            .push(widget::text::body(explanation).width(Length::Fixed(520.0)))
+            .push(widget::text::monotext(format_fingerprint(fingerprint)))
+            .spacing(12)
+            .align_x(Alignment::Center);
+        let trust = widget::button::destructive(if changed {
+            "Trust the new identity"
+        } else {
+            "Trust"
+        });
+        if changed {
+            // A changed identity takes a deliberate extra step (fingerprint fatigue).
+            column = column.push(
+                widget::checkbox(self.change_acknowledged)
+                    .label("I have checked the new fingerprint with the computer's owner")
+                    .on_toggle(Message::AcknowledgeChange),
+            );
+            let trust =
+                trust.on_press_maybe(self.change_acknowledged.then_some(Message::TrustIdentity));
+            column = column.push(
+                widget::Row::new()
+                    .push(widget::button::suggested("Disconnect").on_press(Message::BackToStart))
+                    .push(trust)
+                    .spacing(8),
+            );
+        } else {
+            column = column.push(
+                widget::Row::new()
+                    .push(widget::button::standard("Cancel").on_press(Message::BackToStart))
+                    .push(widget::button::suggested("Trust").on_press(Message::TrustIdentity))
+                    .spacing(8),
+            );
+        }
+        centred(column)
     }
 
     fn desktop_view(&self) -> Element<'_, Message> {
@@ -803,6 +1018,20 @@ fn to_u16(value: f32) -> u16 {
     value.clamp(0.0, f32::from(u16::MAX)) as u16
 }
 
+/// SHA-256 as colon-separated hex, in two lines of 16 bytes.
+fn format_fingerprint(fingerprint: &Fingerprint) -> String {
+    fingerprint
+        .chunks(16)
+        .map(|half| {
+            half.iter()
+                .map(|b| format!("{b:02X}"))
+                .collect::<Vec<_>>()
+                .join(":")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn centred<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     widget::container(content)
         .width(Length::Fill)
@@ -875,6 +1104,8 @@ fn connection(request: &ConnectRequest) -> impl iced::futures::Stream<Item = Net
             port: request.port,
         };
         let config = SessionConfig {
+            pinned_identity: request.pinned,
+            expect_encryption: request.pinned.is_some(),
             view_only: request.view_only,
             shared: request.shared,
             quality: request.quality,

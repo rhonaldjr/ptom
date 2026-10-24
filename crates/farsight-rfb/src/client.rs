@@ -4,7 +4,7 @@
 //! [`ClientConnection::poll`] until it returns `Ok(None)`, and send whatever
 //! [`ClientConnection::take_output`] returns.
 
-use crate::auth::{AuthProgress, Authenticator, TransportUpgrade};
+use crate::auth::{AuthProgress, AuthRequest, AuthResponse, Authenticator, TransportUpgrade};
 use crate::buffer::InputBuffer;
 use crate::connection::{ProtocolError, SECURITY_RESULT_OK, has_security_result};
 use crate::handshake::{ServerInit, read_reason};
@@ -62,6 +62,8 @@ pub enum ClientEvent {
     SecurityTypes(Vec<SecurityType>),
     /// Upgrade the transport, then call [`ClientConnection::transport_upgraded`].
     UpgradeTransport(TransportUpgrade),
+    /// Authentication needs the user; answer with [`ClientConnection::respond_auth`].
+    AuthRequest(AuthRequest),
     /// The handshake finished; normal messages may now be sent.
     Connected(ServerInit),
     /// A rectangle was decoded and applied to the framebuffer.
@@ -95,6 +97,10 @@ enum Phase {
         auth: Box<dyn Authenticator>,
     },
     AwaitTransportUpgrade {
+        security: SecurityType,
+        auth: Box<dyn Authenticator>,
+    },
+    AuthPaused {
         security: SecurityType,
         auth: Box<dyn Authenticator>,
     },
@@ -197,6 +203,27 @@ impl ClientConnection {
         }
     }
 
+    /// Answers an [`ClientEvent::AuthRequest`] and resumes authentication.
+    ///
+    /// # Errors
+    /// [`ProtocolError::InvalidState`] if authentication is not paused, or
+    /// the authenticator's error if it rejects the response.
+    pub fn respond_auth(&mut self, response: AuthResponse) -> Result<(), ProtocolError> {
+        match std::mem::replace(&mut self.phase, Phase::Closed) {
+            Phase::AuthPaused { security, mut auth } => {
+                auth.respond(response)?;
+                self.phase = Phase::Authenticating { security, auth };
+                Ok(())
+            }
+            other => {
+                self.phase = other;
+                Err(ProtocolError::InvalidState(
+                    "authentication is not waiting for a response",
+                ))
+            }
+        }
+    }
+
     /// Queues a normal-phase message for the server.
     ///
     /// # Errors
@@ -233,7 +260,10 @@ impl ClientConnection {
             let progressed = match self.phase {
                 Phase::AwaitVersion => self.read_version()?,
                 Phase::AwaitSecurityTypes => return incomplete_as_none(self.read_security_types()),
-                Phase::ChooseSecurity(_) | Phase::AwaitTransportUpgrade { .. } | Phase::Closed => {
+                Phase::ChooseSecurity(_)
+                | Phase::AwaitTransportUpgrade { .. }
+                | Phase::AuthPaused { .. }
+                | Phase::Closed => {
                     return Ok(None);
                 }
                 Phase::Authenticating { .. } => match self.authenticate()? {
@@ -320,6 +350,15 @@ impl ClientConnection {
                 };
                 self.phase = Phase::AwaitTransportUpgrade { security, auth };
                 Ok(Step::Event(ClientEvent::UpgradeTransport(upgrade)))
+            }
+            AuthProgress::Paused(request) => {
+                let Phase::Authenticating { security, auth } =
+                    std::mem::replace(&mut self.phase, Phase::Closed)
+                else {
+                    return Ok(Step::Waiting);
+                };
+                self.phase = Phase::AuthPaused { security, auth };
+                Ok(Step::Event(ClientEvent::AuthRequest(request)))
             }
             AuthProgress::Complete => {
                 if has_security_result(self.version, *security) {

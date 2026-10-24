@@ -11,4 +11,4 @@ mod session;
 
 pub use address::ServerAddress;
 pub use options::ViewerOptions;
-pub use session::{Session, SessionConfig, SessionEvent, SessionStatus};
+pub use session::{Fingerprint, IdentityKind, Session, SessionConfig, SessionEvent, SessionStatus};

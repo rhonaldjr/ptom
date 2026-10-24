@@ -7,6 +7,7 @@
 //! The authenticator signals this with [`AuthProgress::UpgradeTransport`] and
 //! the caller performs the upgrade before feeding further bytes.
 
+use secrecy::SecretString;
 use thiserror::Error;
 
 /// Why authentication failed.
@@ -28,12 +29,59 @@ impl AuthError {
 }
 
 /// A transport change requested by a security type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TransportUpgrade {
     /// Start a TLS session (VeNCrypt X509 subtypes). All later bytes, in both
     /// directions, flow inside TLS.
     Tls,
+    /// Start RA2's AES-EAX framing with these session keys (RSA-AES types).
+    Ra2 {
+        /// Key for frames this side sends.
+        send_key: Vec<u8>,
+        /// Key for frames this side receives.
+        receive_key: Vec<u8>,
+    },
+}
+
+impl std::fmt::Debug for TransportUpgrade {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never print session keys.
+        match self {
+            Self::Tls => f.write_str("Tls"),
+            Self::Ra2 { .. } => f.write_str("Ra2 { .. }"),
+        }
+    }
+}
+
+/// Something an authenticator needs from the user before it can continue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthRequest {
+    /// A password, and a username too if `username` is true.
+    Credentials {
+        /// Whether a username is needed.
+        username: bool,
+    },
+    /// Confirm the server's public key (RA2), identified by its SHA-256
+    /// fingerprint, before any credentials are sent.
+    ConfirmServerKey {
+        /// SHA-256 of the key as sent on the wire.
+        fingerprint: [u8; 32],
+    },
+}
+
+/// The answer to an [`AuthRequest`].
+#[derive(Debug, Clone)]
+pub enum AuthResponse {
+    /// Credentials for [`AuthRequest::Credentials`].
+    Credentials {
+        /// Username, when one was requested.
+        username: Option<SecretString>,
+        /// Password.
+        password: SecretString,
+    },
+    /// The user (or a pinned fingerprint) accepted the server key.
+    ServerKeyAccepted,
 }
 
 /// Result of one authenticator step.
@@ -43,6 +91,8 @@ pub enum AuthProgress {
     NeedMore,
     /// The caller must upgrade the transport, then call `advance` again.
     UpgradeTransport(TransportUpgrade),
+    /// Waiting for the user: answer with [`Authenticator::respond`].
+    Paused(AuthRequest),
     /// The security type's exchange is complete.
     Complete,
 }
@@ -60,6 +110,15 @@ pub trait Authenticator: Send {
         input: &[u8],
         output: &mut Vec<u8>,
     ) -> Result<(usize, AuthProgress), AuthError>;
+
+    /// Supplies the answer to a request made with [`AuthProgress::Paused`].
+    ///
+    /// # Errors
+    /// [`AuthError`] if no such request is pending.
+    fn respond(&mut self, response: AuthResponse) -> Result<(), AuthError> {
+        let _ = response;
+        Err(AuthError::new("unexpected authentication response"))
+    }
 }
 
 /// The `None` security type: nothing to exchange.

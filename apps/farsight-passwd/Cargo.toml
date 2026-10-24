@@ -1,6 +1,6 @@
 [package]
 name = "farsight-passwd"
-description = "vncpasswd-compatible password tool"
+description = "Password tool for the Farsight agent (replaces vncpasswd)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,8 +9,14 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-farsight-security.workspace = true
 farsight-vault.workspace = true
+anyhow.workspace = true
+rpassword.workspace = true
+secrecy.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

@@ -7,9 +7,9 @@ connect to the VNC servers you already have, and it is built to replace TigerVNC
 usually miss: finding computers automatically, keeping several desktops open at once, and keeping your
 passwords safe.
 
-> **Project status: early development.** The **viewer works**: it connects to the VNC servers you already
-> run (TigerVNC, x11vnc, and others). Encrypted connections and saved passwords are next (milestone M3).
-> See [what's coming](#whats-coming).
+> **Project status: early development.** The **viewer works**, with **encrypted connections** and **saved
+> computers**. It connects to the VNC servers you already run (TigerVNC, x11vnc, and others). Finding computers
+> on your network automatically is next (milestone M3.5). See [what's coming](#whats-coming).
 
 ---
 
@@ -39,7 +39,7 @@ Sharing and other VNC software.
 | ✅ M0 | Project foundation: automated testing and releases |
 | ✅ M1 | The core VNC protocol, built and tested |
 | ✅ M2 | **First usable viewer:** connect to your existing VNC servers |
-| M3 | Secure connections and saved passwords |
+| ✅ M3 | Secure connections and saved passwords |
 | M3.5 | Automatic discovery of the computers on your network |
 | M4 | Share your COSMIC / Wayland desktop |
 | M5 | Share your X11 desktop |
@@ -69,8 +69,22 @@ farsight -ViewOnly pop-os:1   # watch without controlling
 ```
 
 - Press **F8** for the viewer menu: full screen, view only, Ctrl+Alt+Del, disconnect.
-- The window header always shows whether the connection is **encrypted**. Today only unencrypted VNC
-  connections are possible, so Farsight asks before using one on your network. Encrypted connections arrive in M3.
+- The window header always shows whether the connection is **encrypted**. Farsight uses encryption whenever the
+  server offers it (TigerVNC's X509 and RSA-AES modes). It asks before using an unencrypted connection on your network.
+- The first time you connect securely, Farsight shows the computer's **fingerprint** so you can check it, then
+  remembers it. If it ever changes, Farsight warns you before anything is sent.
+- Computers you connect to are remembered and searchable from the connect screen. Tick **Remember on this computer**
+  to save a password; it's stored encrypted, with the key in your system keyring.
+
+## Set up passwords for a Farsight server
+
+`farsight-passwd` replaces `vncpasswd`. It never stores passwords in the weak old format:
+
+```bash
+farsight-passwd user add alice      # a user who signs in with a username and password (stored as a secure hash)
+farsight-passwd vncauth set         # a password for older viewers (weak; for compatibility only)
+farsight-passwd import              # bring over an existing ~/.vnc/passwd
+```
 - Resizing the window resizes the remote desktop when the server allows it (turn this off with `-RemoteResize=0`).
 - Farsight accepts TigerVNC's `vncviewer` options. Run `farsight --help` to see them.
 

@@ -1,6 +1,8 @@
 //! Interop (Q4) against a real TigerVNC server. Opt-in: set
 //! `FARSIGHT_INTEROP_ADDR` (e.g. `127.0.0.1::5901`) and optionally
-//! `FARSIGHT_INTEROP_PASSWORD`. CI starts `tests/interop/tigervnc`.
+//! `FARSIGHT_INTEROP_PASSWORD`; set `FARSIGHT_INTEROP_EXPECT_ENCRYPTED=1`
+//! when the server only offers encrypted security types. CI starts
+//! `tests/interop/tigervnc` in several configurations.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -40,10 +42,28 @@ async fn connects_authenticates_and_decodes_a_red_desktop() {
             Update::Event(SessionEvent::InsecureConsentRequired { .. }) => {
                 assert!(handle.send(Command::ConsentInsecure));
             }
-            Update::Event(SessionEvent::PasswordRequired) => {
-                assert!(handle.send(Command::Password(SecretString::from(password.clone()))));
+            Update::Event(SessionEvent::CredentialsRequired { username }) => {
+                let username = username.then(|| SecretString::from("farsight".to_owned()));
+                let password = SecretString::from(password.clone());
+                assert!(handle.send(Command::Credentials { username, password }));
             }
-            Update::Event(SessionEvent::Connected { width, height, .. }) => {
+            Update::Event(SessionEvent::IdentityConfirmationRequired { .. }) => {
+                assert!(handle.send(Command::ConfirmIdentity));
+            }
+            Update::Event(SessionEvent::Connected {
+                width,
+                height,
+                encrypted,
+                security,
+                ..
+            }) => {
+                eprintln!("connected with {security:?}, encrypted = {encrypted}");
+                if std::env::var("FARSIGHT_INTEROP_EXPECT_ENCRYPTED").is_ok_and(|v| v == "1") {
+                    assert!(
+                        encrypted,
+                        "expected an encrypted connection, got {security:?}"
+                    );
+                }
                 connected = Some((width, height));
             }
             Update::Frame(frame) => {

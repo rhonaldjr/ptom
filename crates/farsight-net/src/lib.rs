@@ -7,6 +7,7 @@
 //!
 //! [`Session`]: farsight_client::Session
 
+mod transport;
 mod viewer;
 
 pub use viewer::{Command, ConnectError, ConnectionHandle, CursorImage, Frame, Update, connect};

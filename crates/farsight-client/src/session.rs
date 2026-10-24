@@ -1,18 +1,38 @@
 //! One viewer connection: handshake policy, update loop, input and clipboard.
 
 use farsight_codec::{Decoder, Framebuffer};
-use farsight_rfb::auth::{Authenticator, NoAuth};
+use farsight_rfb::auth::{AuthRequest, AuthResponse, Authenticator, NoAuth, TransportUpgrade};
 use farsight_rfb::client::{ClientConfig, ClientConnection, ClientEvent};
 use farsight_rfb::{
     ClientMessage, CutText, Encoding, Limits, PixelFormat, ProtocolError, Rect, RectHeader, Screen,
     SecurityType,
 };
 use farsight_security::SecurityPolicy;
+use farsight_security::ra2::{Ra2Client, Ra2Variant};
+use farsight_security::vencrypt::VeNCryptClient;
 use farsight_security::vnc_auth::VncAuthClient;
 use secrecy::SecretString;
 
 /// Security types this build can complete, strongest first.
-const IMPLEMENTED_SECURITY: [SecurityType; 2] = [SecurityType::VncAuth, SecurityType::None];
+const IMPLEMENTED_SECURITY: [SecurityType; 5] = [
+    SecurityType::VeNCrypt,
+    SecurityType::Ra256,
+    SecurityType::Ra2,
+    SecurityType::VncAuth,
+    SecurityType::None,
+];
+
+/// SHA-256 fingerprint of a server identity (TLS leaf certificate or RA2 key).
+pub type Fingerprint = [u8; 32];
+
+/// What kind of key a fingerprint identifies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityKind {
+    /// A TLS server certificate (VeNCrypt).
+    Certificate,
+    /// An RSA public key (RSA-AES).
+    RsaKey,
+}
 
 /// How a [`Session`] should connect.
 #[allow(clippy::struct_excessive_bools)] // Independent user settings.
@@ -22,8 +42,15 @@ pub struct SessionConfig {
     pub loopback: bool,
     /// The user already agreed to an unencrypted connection to this server.
     pub allow_insecure: bool,
+    /// Username, if already known (for Plain / RSA-AES user logins).
+    pub username: Option<SecretString>,
     /// Password, if already known (from the vault or a password file).
     pub password: Option<SecretString>,
+    /// Fingerprint the user trusted before for this server.
+    pub pinned_identity: Option<Fingerprint>,
+    /// This server used encryption before: refuse unencrypted security
+    /// rather than offer it (downgrade protection).
+    pub expect_encryption: bool,
     /// Do not send input.
     pub view_only: bool,
     /// Ask the server to keep other viewers connected.
@@ -39,8 +66,10 @@ pub struct SessionConfig {
 pub enum SessionStatus {
     /// Negotiating with the server.
     Handshaking,
-    /// Paused until [`Session::provide_password`].
-    WaitingForPassword,
+    /// Paused until [`Session::provide_credentials`].
+    WaitingForCredentials,
+    /// Paused until [`Session::confirm_identity`].
+    WaitingForIdentity,
     /// Paused until [`Session::consent_insecure`].
     WaitingForInsecureConsent,
     /// Desktop is live.
@@ -52,8 +81,27 @@ pub enum SessionStatus {
 /// Something the UI should react to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
-    /// Ask the user for the password, then call [`Session::provide_password`].
-    PasswordRequired,
+    /// Ask the user for a password (and a username if `username`), then call
+    /// [`Session::provide_credentials`].
+    CredentialsRequired {
+        /// Whether a username is needed too.
+        username: bool,
+    },
+    /// The server's identity is new or has changed. Show the fingerprint and
+    /// call [`Session::confirm_identity`] only if the user trusts it. No
+    /// credentials have been sent yet.
+    IdentityConfirmationRequired {
+        /// The presented fingerprint.
+        fingerprint: Fingerprint,
+        /// Certificate or RSA key.
+        kind: IdentityKind,
+        /// A different identity was pinned for this server before.
+        changed: bool,
+    },
+    /// For the transport adapter: switch the connection to TLS or RA2
+    /// framing, then call [`Session::tls_established`] (TLS) or
+    /// [`Session::transport_upgraded`] (RA2).
+    TransportUpgrade(TransportUpgrade),
     /// The server only offers unencrypted security. Warn the user and call
     /// [`Session::consent_insecure`] if they accept (Nielsen #5).
     InsecureConsentRequired {
@@ -72,6 +120,8 @@ pub enum SessionEvent {
         security: SecurityType,
         /// Whether traffic is encrypted.
         encrypted: bool,
+        /// The server identity presented (and trusted) during the handshake.
+        identity: Option<(IdentityKind, Fingerprint)>,
     },
     /// Part of the framebuffer changed.
     Damaged(Rect),
@@ -93,8 +143,13 @@ pub enum SessionEvent {
 }
 
 enum Pending {
+    /// A legacy VncAuth password, needed before choosing the type.
     Password(SecurityType),
+    /// Credentials requested by the running authenticator.
+    Credentials,
     InsecureConsent(SecurityType),
+    ServerKey,
+    TlsIdentity,
 }
 
 /// One viewer connection, independent of sockets and UI.
@@ -105,6 +160,8 @@ pub struct Session {
     status: SessionStatus,
     pending: Option<Pending>,
     security: Option<SecurityType>,
+    encrypted: bool,
+    presented_identity: Option<(IdentityKind, Fingerprint)>,
     last_clipboard: Option<String>,
 }
 
@@ -123,6 +180,8 @@ impl Session {
             status: SessionStatus::Handshaking,
             pending: None,
             security: None,
+            encrypted: false,
+            presented_identity: None,
             last_clipboard: None,
         }
     }
@@ -133,10 +192,16 @@ impl Session {
         self.status
     }
 
-    /// Whether traffic is encrypted (false for legacy security types).
+    /// Whether traffic is encrypted (TLS or RA2 is in place).
     #[must_use]
     pub fn encrypted(&self) -> bool {
-        false
+        self.encrypted
+    }
+
+    /// The server identity presented during this handshake, for pinning.
+    #[must_use]
+    pub fn presented_identity(&self) -> Option<(IdentityKind, Fingerprint)> {
+        self.presented_identity
     }
 
     /// The negotiated security type, once chosen.
@@ -191,16 +256,97 @@ impl Session {
         result.map(|()| events)
     }
 
-    /// Supplies the password requested by [`SessionEvent::PasswordRequired`].
+    /// Supplies the credentials requested by [`SessionEvent::CredentialsRequired`].
     ///
     /// # Errors
-    /// [`ProtocolError::InvalidState`] if no password was requested.
+    /// [`ProtocolError::InvalidState`] if none were requested.
+    pub fn provide_credentials(
+        &mut self,
+        username: Option<SecretString>,
+        password: SecretString,
+    ) -> Result<(), ProtocolError> {
+        match self.pending.take() {
+            Some(Pending::Password(security)) => {
+                self.config.password = Some(password);
+                self.choose(security)
+            }
+            Some(Pending::Credentials) => {
+                self.status = SessionStatus::Handshaking;
+                self.connection
+                    .respond_auth(AuthResponse::Credentials { username, password })
+            }
+            other => {
+                self.pending = other;
+                Err(ProtocolError::InvalidState("no credentials requested"))
+            }
+        }
+    }
+
+    /// Supplies just a password (see [`Self::provide_credentials`]).
+    ///
+    /// # Errors
+    /// [`ProtocolError::InvalidState`] if none was requested.
     pub fn provide_password(&mut self, password: SecretString) -> Result<(), ProtocolError> {
-        let Some(Pending::Password(security)) = self.pending.take() else {
-            return Err(ProtocolError::InvalidState("no password requested"));
-        };
-        self.config.password = Some(password);
-        self.choose(security)
+        self.provide_credentials(None, password)
+    }
+
+    /// Trusts the identity shown with [`SessionEvent::IdentityConfirmationRequired`].
+    ///
+    /// # Errors
+    /// [`ProtocolError::InvalidState`] if no confirmation was requested.
+    pub fn confirm_identity(&mut self) -> Result<(), ProtocolError> {
+        match self.pending.take() {
+            Some(Pending::ServerKey) => {
+                self.status = SessionStatus::Handshaking;
+                self.connection
+                    .respond_auth(AuthResponse::ServerKeyAccepted)
+            }
+            Some(Pending::TlsIdentity) => {
+                self.status = SessionStatus::Handshaking;
+                self.encrypted = true;
+                self.connection.transport_upgraded()
+            }
+            other => {
+                self.pending = other;
+                Err(ProtocolError::InvalidState(
+                    "no identity confirmation requested",
+                ))
+            }
+        }
+    }
+
+    /// Called by the transport once TLS is up: `valid_chain` says whether the
+    /// certificate chains to a trusted CA for this host name.
+    ///
+    /// # Errors
+    /// [`ProtocolError::InvalidState`] if no TLS upgrade was requested.
+    pub fn tls_established(
+        &mut self,
+        fingerprint: Fingerprint,
+        valid_chain: bool,
+    ) -> Result<Option<SessionEvent>, ProtocolError> {
+        self.presented_identity = Some((IdentityKind::Certificate, fingerprint));
+        if valid_chain || self.config.pinned_identity == Some(fingerprint) {
+            self.encrypted = true;
+            self.connection.transport_upgraded()?;
+            return Ok(None);
+        }
+        self.pending = Some(Pending::TlsIdentity);
+        self.status = SessionStatus::WaitingForIdentity;
+        Ok(Some(SessionEvent::IdentityConfirmationRequired {
+            fingerprint,
+            kind: IdentityKind::Certificate,
+            changed: self.config.pinned_identity.is_some(),
+        }))
+    }
+
+    /// Called by the transport once RA2 framing is in place.
+    ///
+    /// # Errors
+    /// [`ProtocolError::InvalidState`] if no upgrade was requested.
+    pub fn transport_upgraded(&mut self) -> Result<(), ProtocolError> {
+        self.encrypted = true;
+        self.connection.transport_upgraded()
     }
 
     /// Accepts an unencrypted connection after [`SessionEvent::InsecureConsentRequired`].
@@ -284,10 +430,15 @@ impl Session {
                         return Ok(());
                     }
                 }
-                ClientEvent::UpgradeTransport(_) => {
-                    return Err(ProtocolError::InvalidState(
-                        "transport upgrades arrive in M3",
-                    ));
+                ClientEvent::UpgradeTransport(upgrade) => {
+                    events.push(SessionEvent::TransportUpgrade(upgrade));
+                    return Ok(());
+                }
+                ClientEvent::AuthRequest(request) => {
+                    if let Some(event) = self.on_auth_request(&request)? {
+                        events.push(event);
+                        return Ok(());
+                    }
                 }
                 ClientEvent::Connected(init) => {
                     self.on_connected(init.width, init.height)?;
@@ -297,6 +448,7 @@ impl Session {
                         height: init.height,
                         security: self.security.unwrap_or(SecurityType::None),
                         encrypted: self.encrypted(),
+                        identity: self.presented_identity,
                     });
                 }
                 ClientEvent::Rect(header) => events.push(self.on_rect(&header)),
@@ -319,6 +471,34 @@ impl Session {
         Ok(())
     }
 
+    fn on_auth_request(
+        &mut self,
+        request: &AuthRequest,
+    ) -> Result<Option<SessionEvent>, ProtocolError> {
+        match *request {
+            AuthRequest::Credentials { username } => {
+                self.pending = Some(Pending::Credentials);
+                self.status = SessionStatus::WaitingForCredentials;
+                Ok(Some(SessionEvent::CredentialsRequired { username }))
+            }
+            AuthRequest::ConfirmServerKey { fingerprint } => {
+                self.presented_identity = Some((IdentityKind::RsaKey, fingerprint));
+                if self.config.pinned_identity == Some(fingerprint) {
+                    self.connection
+                        .respond_auth(AuthResponse::ServerKeyAccepted)?;
+                    return Ok(None);
+                }
+                self.pending = Some(Pending::ServerKey);
+                self.status = SessionStatus::WaitingForIdentity;
+                Ok(Some(SessionEvent::IdentityConfirmationRequired {
+                    fingerprint,
+                    kind: IdentityKind::RsaKey,
+                    changed: self.config.pinned_identity.is_some(),
+                }))
+            }
+        }
+    }
+
     fn on_security_types(
         &mut self,
         offered: &[SecurityType],
@@ -328,6 +508,13 @@ impl Session {
             .copied()
             .filter(|t| IMPLEMENTED_SECURITY.contains(t))
             .collect();
+        if self.config.expect_encryption && SecurityPolicy::NETWORK.select(&usable).is_none() {
+            return Err(ProtocolError::Refused(
+                "this computer used an encrypted connection before but now offers only unencrypted ones; \
+                 someone may be interfering with the connection"
+                    .into(),
+            ));
+        }
         let lenient = self.config.loopback || self.config.allow_insecure;
         let policy = if lenient {
             SecurityPolicy::LOOPBACK
@@ -355,17 +542,25 @@ impl Session {
     ) -> Result<Option<SessionEvent>, ProtocolError> {
         if security == SecurityType::VncAuth && self.config.password.is_none() {
             self.pending = Some(Pending::Password(security));
-            self.status = SessionStatus::WaitingForPassword;
-            return Ok(Some(SessionEvent::PasswordRequired));
+            self.status = SessionStatus::WaitingForCredentials;
+            return Ok(Some(SessionEvent::CredentialsRequired { username: false }));
         }
         self.choose(security)?;
         Ok(None)
     }
 
     fn choose(&mut self, security: SecurityType) -> Result<(), ProtocolError> {
-        let auth: Box<dyn Authenticator> = match (security, &self.config.password) {
-            (SecurityType::VncAuth, Some(password)) => {
-                Box::new(VncAuthClient::new(password.clone()))
+        let (username, password) = (self.config.username.clone(), self.config.password.clone());
+        let auth: Box<dyn Authenticator> = match security {
+            SecurityType::VncAuth => match password {
+                Some(password) => Box::new(VncAuthClient::new(password)),
+                None => return Err(ProtocolError::InvalidState("VncAuth without a password")),
+            },
+            SecurityType::VeNCrypt => Box::new(VeNCryptClient::new(username, password)),
+            SecurityType::Ra2 | SecurityType::Ra256 => {
+                let variant = Ra2Variant::for_security_type(security)
+                    .ok_or(ProtocolError::InvalidState("unsupported RSA-AES variant"))?;
+                Box::new(Ra2Client::new(variant, username, password))
             }
             _ => Box::new(NoAuth),
         };

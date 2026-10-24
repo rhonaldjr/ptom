@@ -90,9 +90,9 @@ fn unencrypted_server_on_the_network_requires_consent_then_password() {
 
     assert_eq!(
         w.session.consent_insecure().unwrap(),
-        Some(SessionEvent::PasswordRequired)
+        Some(SessionEvent::CredentialsRequired { username: false })
     );
-    assert_eq!(w.session.status(), SessionStatus::WaitingForPassword);
+    assert_eq!(w.session.status(), SessionStatus::WaitingForCredentials);
     w.session
         .provide_password(SecretString::from("pw".to_owned()))
         .unwrap();
@@ -250,11 +250,11 @@ fn server_clipboard_is_delivered_and_not_echoed_back() {
 }
 
 #[test]
-fn modern_only_server_is_refused_until_m3() {
+fn server_without_supported_security_is_refused() {
     let mut session = Session::new(network());
     let mut server = ServerConnection::new(ServerConfig {
         max_version: ProtocolVersion::V3_8,
-        security_types: vec![SecurityType::VeNCrypt],
+        security_types: vec![SecurityType::Tight],
         limits: Limits::DEFAULT,
     });
     session.receive(&server.take_output());

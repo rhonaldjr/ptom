@@ -17,7 +17,10 @@ integrity · viewer host integrity · the local user's awareness that they are b
 | Threat (ATT&CK / OWASP) | Mitigation | Milestone |
 |---|---|---|
 | T1110 brute force on VncAuth | Rate limit and lockout · VncAuth gated | M1, M4 |
-| T1557 MITM / security-type downgrade | X509/RA2 with pinning · warn on downgrade | M3 |
+| T1557 MITM / security-type downgrade | X509/RA2 with TOFU pinning; identity checked before credentials are sent; pinned servers must offer encryption (ADR-0017) | M3 ✅ |
+| Marvin timing attack on RSA decryption (RA2) | aws-lc-rs constant-time PKCS#1 v1.5, not the `rsa` crate (ADR-0016) | M3 ✅ |
+| Credential theft from disk | XChaCha20-Poly1305 vault with the key in the OS keyring; agent passwords stored as Argon2id hashes; `~/.vnc/passwd` never written (ADR-0008, ADR-0014) | M3 ✅ |
+| Fingerprint fatigue (users click through changed-key warnings) | A changed identity needs an explicit extra acknowledgement; Disconnect is the default | M3 ✅ |
 | API4 resource exhaustion (cut text, encodings count, zlib bombs) | Bounded decoders · fuzzing | M1, M8 |
 | API3 view-only client sends input | Server-side enforcement in the state machine | M4 |
 | API10 malicious server → viewer RCE/DoS | Memory-safe decoders · fuzzing · bounds checks | M2 |

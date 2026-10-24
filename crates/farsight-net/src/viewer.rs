@@ -6,11 +6,12 @@ use bytes::Bytes;
 
 use farsight_client::{ServerAddress, Session, SessionConfig, SessionEvent, SessionStatus};
 use farsight_rfb::SecurityType;
+use farsight_rfb::auth::TransportUpgrade;
 use secrecy::SecretString;
 use thiserror::Error;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::net::tcp::OwnedWriteHalf;
+
+use crate::transport::Transport;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
@@ -35,8 +36,15 @@ pub enum Command {
     },
     /// Local clipboard text.
     Clipboard(String),
-    /// Answer to [`SessionEvent::PasswordRequired`].
-    Password(SecretString),
+    /// Answer to [`SessionEvent::CredentialsRequired`].
+    Credentials {
+        /// Username, when one was requested.
+        username: Option<SecretString>,
+        /// Password.
+        password: SecretString,
+    },
+    /// Trust the identity shown with [`SessionEvent::IdentityConfirmationRequired`].
+    ConfirmIdentity,
     /// Answer to [`SessionEvent::InsecureConsentRequired`].
     ConsentInsecure,
     /// Toggle view-only mode.
@@ -131,12 +139,20 @@ pub async fn connect(
     let (stream, peer) = open(address).await?;
     config.loopback = peer.ip().is_loopback();
     let _ = stream.set_nodelay(true);
+    let address_host = address.host.clone();
     let (commands_tx, commands_rx) = mpsc::unbounded_channel();
     let (updates_tx, updates_rx) = mpsc::unbounded_channel();
     tokio::spawn(async move {
-        let reason = drive(stream, Session::new(config), commands_rx, &updates_tx)
-            .await
-            .err();
+        let host = address_host;
+        let reason = drive(
+            Transport::new(stream),
+            &host,
+            Session::new(config),
+            commands_rx,
+            &updates_tx,
+        )
+        .await
+        .err();
         let _ = updates_tx.send(Update::Closed(reason));
     });
     Ok((
@@ -165,45 +181,97 @@ async fn open(address: &ServerAddress) -> Result<(TcpStream, SocketAddr), Connec
 }
 
 async fn drive(
-    stream: TcpStream,
+    mut transport: Transport,
+    host: &str,
     mut session: Session,
     mut commands: mpsc::UnboundedReceiver<Command>,
     updates: &mpsc::UnboundedSender<Update>,
 ) -> Result<(), String> {
-    let (mut reader, mut writer) = stream.into_split();
     let mut buf = vec![0u8; 256 * 1024];
     loop {
-        tokio::select! {
-            read = reader.read(&mut buf) => {
-                let n = read.map_err(|e| e.to_string())?;
-                if n == 0 {
+        let events = tokio::select! {
+            read = transport.read(&mut buf) => {
+                let Some(bytes) = read.map_err(|e| e.to_string())? else {
                     return if session.status() == SessionStatus::Connected {
                         Ok(())
                     } else {
                         Err("the server closed the connection during the handshake".into())
                     };
-                }
-                session.receive(buf.get(..n).unwrap_or_default());
-                let events = session.poll().map_err(|e| e.to_string())?;
-                publish(&session, events, updates);
+                };
+                session.receive(&bytes);
+                session.poll().map_err(|e| e.to_string())?
             }
             command = commands.recv() => {
                 let Some(command) = command else { return Ok(()) };
-                if !apply(&mut session, command, updates).map_err(|e| e.to_string())? {
-                    return Ok(());
+                match apply(&mut session, command).map_err(|e| e.to_string())? {
+                    Some(events) => events,
+                    None => return Ok(()),
                 }
             }
-        }
-        flush(&mut session, &mut writer).await?;
+        };
+        process(&mut transport, host, &mut session, events, updates).await?;
     }
 }
 
-/// Applies a UI command. Returns false when the UI asked to disconnect.
+/// Publishes events, sends pending output, and performs any transport
+/// upgrade the session asked for (repeating until the session settles).
+async fn process(
+    transport: &mut Transport,
+    host: &str,
+    session: &mut Session,
+    mut events: Vec<SessionEvent>,
+    updates: &mpsc::UnboundedSender<Update>,
+) -> Result<(), String> {
+    loop {
+        let upgrade = events.iter().find_map(|e| match e {
+            SessionEvent::TransportUpgrade(u) => Some(u.clone()),
+            _ => None,
+        });
+        events.retain(|e| !matches!(e, SessionEvent::TransportUpgrade(_)));
+        publish(session, events, updates);
+        // Output queued before an upgrade still goes out on the old transport.
+        transport
+            .write(&session.take_output())
+            .await
+            .map_err(|e| e.to_string())?;
+        let Some(upgrade) = upgrade else {
+            return Ok(());
+        };
+        events = match upgrade {
+            TransportUpgrade::Tls => {
+                let identity = transport
+                    .upgrade_tls(host)
+                    .await
+                    .map_err(|e| format!("TLS failed: {e}"))?;
+                let mut events: Vec<_> = session
+                    .tls_established(identity.fingerprint, identity.valid_chain)
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .collect();
+                events.extend(session.poll().map_err(|e| e.to_string())?);
+                events
+            }
+            TransportUpgrade::Ra2 {
+                send_key,
+                receive_key,
+            } => {
+                transport
+                    .enable_ra2(&send_key, &receive_key)
+                    .map_err(|e| e.to_string())?;
+                session.transport_upgraded().map_err(|e| e.to_string())?;
+                session.poll().map_err(|e| e.to_string())?
+            }
+            _ => return Err("unsupported transport upgrade".into()),
+        };
+    }
+}
+
+/// Applies a UI command, returning the resulting events, or `None` when the
+/// UI asked to disconnect.
 fn apply(
     session: &mut Session,
     command: Command,
-    updates: &mpsc::UnboundedSender<Update>,
-) -> Result<bool, farsight_rfb::ProtocolError> {
+) -> Result<Option<Vec<SessionEvent>>, farsight_rfb::ProtocolError> {
     match command {
         Command::Key { down, keysym } => session.key(down, keysym),
         Command::Pointer { buttons, x, y } => session.pointer(buttons, x, y),
@@ -212,20 +280,23 @@ fn apply(
         Command::Resize { width, height } => {
             session.request_resize(width, height);
         }
-        Command::Password(password) => {
-            session.provide_password(password)?;
-            let events = session.poll()?;
-            publish(session, events, updates);
+        Command::Credentials { username, password } => {
+            session.provide_credentials(username, password)?;
+            return session.poll().map(Some);
+        }
+        Command::ConfirmIdentity => {
+            session.confirm_identity()?;
+            return session.poll().map(Some);
         }
         Command::ConsentInsecure => {
             warn!("user accepted an unencrypted connection");
             let mut events: Vec<_> = session.consent_insecure()?.into_iter().collect();
             events.extend(session.poll()?);
-            publish(session, events, updates);
+            return Ok(Some(events));
         }
-        Command::Disconnect => return Ok(false),
+        Command::Disconnect => return Ok(None),
     }
-    Ok(true)
+    Ok(Some(Vec::new()))
 }
 
 fn publish(session: &Session, events: Vec<SessionEvent>, updates: &mpsc::UnboundedSender<Update>) {
@@ -277,12 +348,4 @@ fn snapshot(session: &Session) -> Frame {
         height: u32::from(fb.height()),
         rgba: Bytes::from(rgba),
     }
-}
-
-async fn flush(session: &mut Session, writer: &mut OwnedWriteHalf) -> Result<(), String> {
-    let output = session.take_output();
-    if !output.is_empty() {
-        writer.write_all(&output).await.map_err(|e| e.to_string())?;
-    }
-    Ok(())
 }

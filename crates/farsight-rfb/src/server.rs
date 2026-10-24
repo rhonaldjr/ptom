@@ -338,6 +338,9 @@ impl ServerConnection {
                 }
                 Ok(Step::Event(ServerEvent::UpgradeTransport(upgrade)))
             }
+            AuthProgress::Paused(_) => Err(ProtocolError::InvalidState(
+                "server authenticators cannot pause",
+            )),
             AuthProgress::Complete => {
                 if has_security_result(self.version, security) {
                     self.output.put_u32(SECURITY_RESULT_OK);

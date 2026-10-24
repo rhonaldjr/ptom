@@ -4,6 +4,9 @@
 //! Layer: **Use cases** (ADR-0002). Depends only on `farsight-rfb`. Cryptographic
 //! primitives come from RustCrypto/rustls per ADR-0007.
 
+pub mod der;
+pub mod ra2;
+pub mod vencrypt;
 pub mod vnc_auth;
 
 use farsight_rfb::SecurityType;

@@ -45,7 +45,17 @@ jobs:
       - run: cargo test --workspace --all-features --locked
 
   interop:
-    # Black-box interop against a real TigerVNC server (ADR-0011 allows this).
+    # Black-box interop against real TigerVNC servers (ADR-0011 allows this).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { base: "debian:bookworm-slim", security: VncAuth, encrypted: "0" }
+          - { base: "debian:bookworm-slim", security: None, encrypted: "0" }
+          - { base: "debian:trixie-slim", security: X509Vnc, encrypted: "1" }
+          - { base: "debian:trixie-slim", security: RA2, encrypted: "1" }
+          - { base: "debian:trixie-slim", security: RA2_256, encrypted: "1" }
+    name: interop (${{ matrix.security }})
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -53,12 +63,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Start TigerVNC
         run: |
-          docker build -t farsight-interop-tigervnc tests/interop/tigervnc
-          docker run -d -p 127.0.0.1:15901:5901 farsight-interop-tigervnc
-          sleep 3
+          docker build --build-arg BASE=${{ matrix.base }} -t farsight-interop-tigervnc tests/interop/tigervnc
+          docker run -d -e SECURITY=${{ matrix.security }} -p 127.0.0.1:15901:5901 farsight-interop-tigervnc
+          sleep 5
       - run: cargo test -p farsight-net --test interop_tigervnc --locked -- --nocapture
         env:
           FARSIGHT_INTEROP_ADDR: 127.0.0.1::15901
+          FARSIGHT_INTEROP_EXPECT_ENCRYPTED: ${{ matrix.encrypted }}
 
   deny:
     runs-on: ubuntu-latest

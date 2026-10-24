@@ -81,3 +81,24 @@ path = "fuzz_targets/codec_stream.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "vencrypt_client"
+path = "fuzz_targets/vencrypt_client.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ra2_client"
+path = "fuzz_targets/ra2_client.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "der_rsa"
+path = "fuzz_targets/der_rsa.rs"
+test = false
+doc = false
+bench = false

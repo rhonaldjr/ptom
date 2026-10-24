@@ -10,8 +10,13 @@ publish.workspace = true
 
 [dependencies]
 farsight-rfb.workspace = true
+aes.workspace = true
+aws-lc-rs.workspace = true
 des.workspace = true
+eax.workspace = true
 secrecy.workspace = true
+sha1.workspace = true
+sha2.workspace = true
 subtle.workspace = true
 zeroize.workspace = true
 

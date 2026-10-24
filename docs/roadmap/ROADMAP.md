@@ -36,12 +36,14 @@ VWR-1, VWR-2, VWR-3, VWR-5, VWR-6, VWR-10, VWR-14, INP-1, INP-2, INP-5, ENC-5 (d
   (malicious-server cases, API10) · TigerVNC server interop test in CI (`tests/interop/tigervnc`)
 - Not yet verified by hand: the macOS build (tier 2), and clipboard plus keyboard against a full desktop session. These are Q3 charters for the next release.
 
-## M3: Secure transport and vault · [council](../council/2026-10-23-initial-roadmap.md#m3-secure-transport--vault)
+## M3: Secure transport and vault ☑ · [council](../council/2026-10-23-initial-roadmap.md#m3-secure-transport--vault)
 SEC-5, SEC-6, SEC-7, SEC-8, SEC-9, PRD-10, VWR-8, VWR-9, UTL-1
-- VeNCrypt X509None/X509Vnc/X509Plain over rustls · RA2/RA2ne/RA2_256
-- TOFU fingerprint pinning with a clear "identity changed" flow
-- `farsight-vault` (ADR-0008) · connection history with search · `farsight-passwd`
-- **Conditions:** downgrade test (MITM strips VeNCrypt, so the viewer warns or refuses) · secrets never logged (test)
+- ☑ VeNCrypt X509None/X509Vnc/X509Plain over rustls · RA2/RA2_256 via aws-lc-rs ([ADR-0016](../adr/0016-ra2-crypto-aws-lc.md)); the "ne" variants are not supported
+- ☑ TOFU fingerprint pinning with a clear "identity changed" flow ([ADR-0017](../adr/0017-server-identity-verification.md))
+- ☑ `farsight-vault` (ADR-0008) · connection history with search · `farsight-passwd` (ADR-0014)
+- ☑ **Conditions:** downgrade test (a pinned server offering only legacy security is refused) · secrets never logged (test)
+- Interop verified in CI against TigerVNC: VncAuth, None, X509Vnc, RA2 and RA2_256
+- Follow-ups: passphrase unlock screen when no keyring (P-8); manage saved computers (rename, forget) in the UI
 
 ## M3.5: Find any VNC server · [council](../council/2026-10-23-tray-and-discovery.md#b-discover-any-vnc-server-not-just-farsight-agents)
 PRD-4, VWR-13, VWR-16, VWR-17
