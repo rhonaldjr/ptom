@@ -3,6 +3,9 @@ name: CI
 on:
   pull_request:
   workflow_call:
+  # Milestone and CI branches get the same gate before they reach main.
+  push:
+    branches: ["m*/**", "ci/**"]
 
 permissions:
   contents: read
@@ -75,7 +78,14 @@ jobs:
         run: |
           docker build --build-arg BASE=${{ matrix.base }} -t farsight-interop-tigervnc tests/interop/tigervnc
           docker run -d -e SECURITY=${{ matrix.security }} -p 127.0.0.1:15901:5901 farsight-interop-tigervnc
-          sleep 5
+          # Wait for the RFB greeting rather than a fixed time (X509 setups start slower).
+          for _ in $(seq 60); do
+            if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/15901 && head -c 4 <&3' 2>/dev/null | grep -q RFB; then exit 0; fi
+            sleep 1
+          done
+          docker logs "$(docker ps -lq)"
+          echo "::error title=interop::TigerVNC did not start"
+          exit 1
       - run: cargo test -p farsight-net --test interop_tigervnc --locked -- --nocapture
         env:
           FARSIGHT_INTEROP_ADDR: 127.0.0.1::15901
@@ -112,6 +122,13 @@ jobs:
       - name: Run each fuzz target briefly
         working-directory: fuzz
         run: |
+          status=0
           for target in $(cargo +nightly fuzz list); do
-            cargo +nightly fuzz run "$target" -- -max_total_time=30
+            if ! cargo +nightly fuzz run "$target" -- -max_total_time=30 > "/tmp/$target.log" 2>&1; then
+              status=1
+              cat "/tmp/$target.log"
+              # Annotations are readable without a login, which helps remote triage.
+              echo "::error title=fuzz $target::$(grep -v '^\s*\(Compiling\|Downloaded\|#[0-9]\)' "/tmp/$target.log" | tail -c 3000 | tr '\n' ' ')"
+            fi
           done
+          exit $status
