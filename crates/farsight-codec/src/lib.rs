@@ -2,7 +2,18 @@
 //! JPEG, and optionally H.264.
 //!
 //! Layer: **Entities** (ADR-0002). Pure functions over byte buffers. No I/O.
-//! Every decoder must bound its allocations by the framebuffer size and must
-//! have a fuzz target (hostile servers attack the viewer: OWASP API10).
+//! Every decoder bounds its work by the framebuffer size and has a fuzz
+//! target, because hostile servers attack the viewer (OWASP API10).
 //!
-//! Roadmap: decoders in M2, encoders in M4/M8.
+//! [`Decoder`] implements [`farsight_rfb::client::RectDecoder`] and owns the
+//! viewer's [`Framebuffer`]. Decoders never apply partial results: they
+//! return `Ok(None)` until the whole rectangle payload is available.
+
+mod decoder;
+pub mod encode;
+mod framebuffer;
+mod pixel;
+
+pub use decoder::Decoder;
+pub use framebuffer::Framebuffer;
+pub use pixel::PixelConverter;

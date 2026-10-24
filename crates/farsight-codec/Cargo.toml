@@ -11,5 +11,8 @@ publish.workspace = true
 [dependencies]
 farsight-rfb.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true

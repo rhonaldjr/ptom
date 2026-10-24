@@ -21,6 +21,7 @@ and windows, LAN discovery of agents, and an encrypted credential vault.
 | Crypto / TLS | rustls and RustCrypto. No OpenSSL or GnuTLS. | [0007](docs/adr/0007-crypto-stack.md) |
 | Secrets | OS keyring plus an encrypted vault. Never store secrets in plaintext. | [0008](docs/adr/0008-secret-storage.md) |
 | Privilege | Agent runs as an unprivileged user service. Never as root. | [0009](docs/adr/0009-least-privilege.md) |
+| Protocol core | Sans-I/O client/server state machines; pluggable `Authenticator`; transport upgrades done by the caller | [0015](docs/adr/0015-sans-io-connections.md) |
 | Discovery | mDNS / DNS-SD `_rfb._tcp` | [0010](docs/adr/0010-lan-discovery.md) |
 | Agent credentials | Argon2id user hashes; legacy VncAuth sealed in the keyring-backed vault; never write `~/.vnc/passwd` | [0014](docs/adr/0014-agent-credentials.md) |
 | Discovery of any VNC server | Passive mDNS always on; active probing only on user-marked networks | [0012](docs/adr/0012-active-rfb-probing.md) |
@@ -106,7 +107,7 @@ No local toolchain? `docker run --rm -v "$PWD":/w -w /w rust:latest cargo test -
   Conventional Commit for the whole milestone. That commit ticks its boxes in
   [ROADMAP.md](docs/roadmap/ROADMAP.md). Squash any interim work commits into it.
 - **Update README.md when you complete a milestone**, in the same milestone commit. Write for users:
-  plain language, little jargon. Cover what farsight is, what works today, what's coming, how to install,
+  plain language, little jargon. Cover what Farsight is, what works today, what's coming, how to install,
   and how to use it. Technical detail belongs only in the "Build locally" and "Develop" sections.
   Deeper material goes in `docs/`.
 - **Every push to `main` produces a release**, so `main` must always be releasable. Commit on a

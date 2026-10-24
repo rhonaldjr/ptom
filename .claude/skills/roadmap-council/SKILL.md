@@ -1,6 +1,6 @@
 ---
 name: roadmap-council
-description: Run a farsight roadmap council session (9 personas, max 3 debate rounds) on a proposed roadmap item before it is added to docs/roadmap/ROADMAP.md. Use whenever anything is added to or reordered on the roadmap.
+description: Run a Farsight roadmap council session (9 personas, max 3 debate rounds) on a proposed roadmap item before it is added to docs/roadmap/ROADMAP.md. Use whenever anything is added to or reordered on the roadmap.
 ---
 
 Follow `docs/process/roadmap-council.md` exactly.

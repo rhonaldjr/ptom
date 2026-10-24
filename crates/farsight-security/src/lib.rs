@@ -4,6 +4,8 @@
 //! Layer: **Use cases** (ADR-0002). Depends only on `farsight-rfb`. Cryptographic
 //! primitives come from RustCrypto/rustls per ADR-0007.
 
+pub mod vnc_auth;
+
 use farsight_rfb::SecurityType;
 
 /// Security types in order of preference, strongest first.
@@ -45,6 +47,17 @@ impl SecurityPolicy {
             .filter(|candidate| self.allow_legacy || !candidate.is_legacy_insecure())
             .find(|candidate| offered.contains(candidate))
     }
+
+    /// Filters the agent's configured security types down to those this
+    /// policy permits, keeping the configured order.
+    #[must_use]
+    pub fn server_offer(self, configured: &[SecurityType]) -> Vec<SecurityType> {
+        configured
+            .iter()
+            .copied()
+            .filter(|t| self.allow_legacy || !t.is_legacy_insecure())
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -82,6 +95,19 @@ mod tests {
         assert_eq!(
             SecurityPolicy::NETWORK.select(&[T::Ra2ne, T::Rane256, T::Unknown(42)]),
             None
+        );
+    }
+
+    #[test]
+    fn network_offer_drops_legacy_types() {
+        let configured = [T::VeNCrypt, T::VncAuth, T::None];
+        assert_eq!(
+            SecurityPolicy::NETWORK.server_offer(&configured),
+            [T::VeNCrypt]
+        );
+        assert_eq!(
+            SecurityPolicy::LOOPBACK.server_offer(&configured),
+            configured
         );
     }
 

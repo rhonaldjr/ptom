@@ -16,19 +16,21 @@ Legend: ☐ not started · ◐ in progress · ☑ done
 - ☑ `cargo-fuzz` harness with targets for the version, pixel-format and security-selection code, plus a CI smoke run
 - ⚠ **User action:** enable branch protection on `main` (require CI and one review). This is a repository setting, not code.
 
-## M1: RFB core, sans-I/O · [council](../council/2026-10-23-initial-roadmap.md#m1-rfb-core)
+## M1: RFB core, sans-I/O ☑ · [council](../council/2026-10-23-initial-roadmap.md#m1-rfb-core)
 NET-1, NET-3, NET-4, NET-5, NET-6, ENC-1, ENC-2, SEC-1, SEC-2, SEC-3
-- Version negotiation 3.3/3.7/3.8, security handshake, ClientInit/ServerInit
-- All core client and server messages, with bounded decoders
-- Client and server state machines (phase-enforced: no input before auth)
-- Raw and CopyRect
-- None/VncAuth implemented but **gated**: loopback-only unless explicitly enabled, with warnings
-- **Conditions:** fuzz target per decoder · proptest round-trips · recorded-transcript tests
+- ☑ Version negotiation 3.3/3.7/3.8, security handshake, ClientInit/ServerInit
+- ☑ All core client and server messages, with bounded decoders
+- ☑ Client and server state machines (phase-enforced: no input before auth) ([ADR-0015](../adr/0015-sans-io-connections.md))
+- ☑ Raw and CopyRect (decode and encode), plus the DesktopSize and LastRect pseudo-encodings
+- ☑ None/VncAuth implemented but **gated** by `SecurityPolicy`: loopback-only unless explicitly enabled
+- ☑ **Conditions:** fuzz target per decoder and state machine · proptest round-trips · RFC 6143 transcript test
+  (a transcript recorded from a real TigerVNC server is part of M2's interop condition)
 
 ## M2: Viewer MVP: view my existing VNC server · [council](../council/2026-10-23-initial-roadmap.md#m2-viewer-mvp)
 VWR-1, VWR-2, VWR-3, VWR-5, VWR-6, VWR-10, VWR-14, INP-1, INP-2, INP-5, ENC-5 (decode), ENC-6 (decode)
 - libcosmic viewer: connect, render, keyboard/mouse, clipboard, fullscreen/windowed, scaling, view-only
 - Decoders: Raw, CopyRect, Hextile, ZRLE, Tight (incl. JPEG)
+- Pseudo-encodings: ExtendedDesktopSize/SetDesktopSize (remote resize) and Cursor/CursorWithAlpha, decode only ([scope council](../council/2026-10-23-m2-scope.md))
 - TigerVNC-compatible CLI (`farsight host:display`, `-ViewOnly`, `-FullScreen`, …)
 - **Conditions:** persistent encryption indicator · decoders fuzzed (malicious-server cases, API10)
   · TigerVNC server interop test in CI

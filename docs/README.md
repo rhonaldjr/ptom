@@ -1,4 +1,4 @@
-# farsight documentation
+# Farsight documentation
 
 | Area | Contents |
 |---|---|

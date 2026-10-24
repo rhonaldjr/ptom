@@ -7,7 +7,7 @@ exclude = ["fuzz"]
 # Stamped from the git tag by .github/workflows/release.yml (ADR-0005). Do not edit by hand.
 version = "0.0.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 publish = false
 repository = "https://github.com/rhonaldjr/ptom"
@@ -28,6 +28,10 @@ farsight-discovery = { path = "crates/farsight-discovery" }
 anyhow = "1"
 rustix = { version = "1", features = ["process"] }
 thiserror = "2"
+des = "0.8"
+secrecy = "0.10"
+subtle = "2.6"
+zeroize = "1"
 proptest = "1"
 
 [workspace.lints.rust]

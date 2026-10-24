@@ -4,7 +4,7 @@
 
 ## Principles applied to farsight
 - A remote-desktop agent is a **remote-access tool**. ATT&CK lists it under T1021.005 (Remote
-  Services: VNC) and T1219 (Remote Access Software). Design so that farsight is hard to abuse for
+  Services: VNC) and T1219 (Remote Access Software). Design so that Farsight is hard to abuse for
   lateral movement and persistence, and easy to detect when it is.
 - **OWASP ASVS** as the verification baseline (V2 authentication, V6 cryptography, V9
   communications, V14 configuration). OWASP Top 10 and the Proactive Controls for the future web UI.

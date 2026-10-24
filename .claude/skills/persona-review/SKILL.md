@@ -1,6 +1,6 @@
 ---
 name: persona-review
-description: Review the current diff (or a given path/PR) through the farsight personas, selected by what the change touches. Use for code reviews on this project.
+description: Review the current diff (or a given path/PR) through the Farsight personas, selected by what the change touches. Use for code reviews on this project.
 ---
 
 1. Determine the change set (`git diff main...HEAD`, staged changes, or the target the user names).

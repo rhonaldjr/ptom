@@ -15,6 +15,8 @@ members = ["."]
 libfuzzer-sys = "0.4"
 farsight-rfb = { path = "../crates/farsight-rfb" }
 farsight-security = { path = "../crates/farsight-security" }
+farsight-codec = { path = "../crates/farsight-codec" }
+secrecy = "0.10"
 
 [[bin]]
 name = "rfb_version"
@@ -33,6 +35,41 @@ bench = false
 [[bin]]
 name = "security_select"
 path = "fuzz_targets/security_select.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "client_connection"
+path = "fuzz_targets/client_connection.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "server_connection"
+path = "fuzz_targets/server_connection.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "client_message"
+path = "fuzz_targets/client_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "server_message"
+path = "fuzz_targets/server_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "codec_rect"
+path = "fuzz_targets/codec_rect.rs"
 test = false
 doc = false
 bench = false

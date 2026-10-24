@@ -13,7 +13,7 @@ Requirement IDs refer to [requirements.md](../spec/requirements.md).
 ## Release slices
 
 ### Slice 1: Walking skeleton (M0–M1)
-- As a contributor, I can build, test and release farsight from CI. *(PRD-6, PRD-7)*
+- As a contributor, I can build, test and release Farsight from CI. *(PRD-6, PRD-7)*
 - As a developer, I can run a farsight-rfb handshake against a recorded TigerVNC transcript in a test. *(NET-1, NET-6)*
 
 ### Slice 2: "View my existing VNC server" (M2–M3)
@@ -28,7 +28,7 @@ Requirement IDs refer to [requirements.md](../spec/requirements.md).
 - As a **home power user**, I want to add a found server in one click, so that it becomes a saved session. *(VWR-17)*
 
 ### Slice 3: "Reach my Pop!_OS COSMIC desktop from the couch" (M4)
-- As a **home power user**, I want to share my live COSMIC session with a farsight agent running as me, so that I can use it from another room. *(SRV-3, SRV-4, PRD-8)*
+- As a **home power user**, I want to share my live COSMIC session with a Farsight agent running as me, so that I can use it from another room. *(SRV-3, SRV-4, PRD-8)*
 - As the **person at the screen**, I want to see when someone is connected and stop them, so that I'm never watched unknowingly. *(SRV-12)*
 
 ### Slice 4: X11 parity (M5)

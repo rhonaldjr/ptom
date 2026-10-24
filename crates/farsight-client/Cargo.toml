@@ -13,5 +13,8 @@ farsight-rfb.workspace = true
 farsight-codec.workspace = true
 farsight-security.workspace = true
 
+[dev-dependencies]
+secrecy.workspace = true
+
 [lints]
 workspace = true

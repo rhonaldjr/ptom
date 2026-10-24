@@ -9,7 +9,7 @@ Each ID maps to a roadmap milestone in [ROADMAP.md](../roadmap/ROADMAP.md).
 - **PRD-1** Open-source (MIT), Rust, drop-in replacement for TigerVNC (CLI flags, `~/.vnc` / XDG config, systemd units, wire interop).
 - **PRD-2** Works on X11 and Wayland.
 - **PRD-3** Viewer stores multiple desktop sessions and opens them in tabs or separate windows.
-- **PRD-4** Viewer automatically discovers VNC servers on the home network (LAN/Wi-Fi): farsight agents **and any other RFB server**. It lists them and offers to add them ([ADR-0012](../adr/0012-active-rfb-probing.md)).
+- **PRD-4** Viewer automatically discovers VNC servers on the home network (LAN/Wi-Fi): Farsight agents **and any other RFB server**. It lists them and offers to add them ([ADR-0012](../adr/0012-active-rfb-probing.md)).
 - **PRD-5** Desktop environments, in priority order: COSMIC (Pop!_OS, Rust COSMIC epoch), GNOME (incl. Pop!_OS GNOME), KDE Plasma, Xfce, others.
 - **PRD-6** Comprehensive automated testing: unit, property, fuzz, integration and interop.
 - **PRD-7** GitHub Actions cuts a versioned release on every push to `main` ([ADR-0005](../adr/0005-release-per-push.md)).

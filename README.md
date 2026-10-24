@@ -7,12 +7,12 @@ connect to the VNC servers you already have, and it is built to replace TigerVNC
 usually miss: finding computers automatically, keeping several desktops open at once, and keeping your
 passwords safe.
 
-> **Project status: early development.** The foundation is in place, but farsight can't connect to anything
-> yet. The first usable version will be the viewer (milestone M2). See [what's coming](#whats-coming).
+> **Project status: early development.** The core of the VNC protocol is built and tested, but there is no
+> app to use yet. The first usable version will be the viewer (milestone M2). See [what's coming](#whats-coming).
 
 ---
 
-## What farsight will do
+## What Farsight will do
 
 **The viewer** (`farsight`): the app you use to see other computers
 - **Finds computers for you.** It lists the VNC servers on your home network automatically, including
@@ -28,7 +28,7 @@ passwords safe.
 - Can also run **desktops that keep going in the background**, even when nobody is connected.
 - Runs as your normal user, never as an administrator, and lets the person at the screen see when someone is connected.
 
-**Works with what you already use.** farsight talks to TigerVNC, TightVNC, RealVNC, noVNC, macOS Screen
+**Works with what you already use.** Farsight talks to TigerVNC, TightVNC, RealVNC, noVNC, macOS Screen
 Sharing and other VNC software.
 
 ## What's coming
@@ -36,7 +36,7 @@ Sharing and other VNC software.
 | Milestone | What you get |
 |---|---|
 | ✅ M0 | Project foundation: automated testing and releases |
-| M1 | The core VNC language, built and tested |
+| ✅ M1 | The core VNC protocol, built and tested |
 | M2 | **First usable viewer:** connect to your existing VNC servers |
 | M3 | Secure connections and saved passwords |
 | M3.5 | Automatic discovery of the computers on your network |

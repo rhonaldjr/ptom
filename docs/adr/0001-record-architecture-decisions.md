@@ -3,7 +3,7 @@
 - **Status:** Accepted · **Date:** 2026-10-23 · **Deciders:** user
 
 ## Context
-Many contributors, both human and AI, need a durable record of why farsight is built the way it is.
+Many contributors, both human and AI, need a durable record of why Farsight is built the way it is.
 
 ## Decision
 Use Michael Nygard-style ADRs in `docs/adr/`, numbered sequentially, starting from `0000-template.md`.
