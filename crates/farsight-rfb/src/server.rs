@@ -77,6 +77,8 @@ pub struct ServerConnection {
     phase: Phase,
     input: InputBuffer,
     output: Vec<u8>,
+    /// The peer sent more than `buffer::MAX_UNREAD` without it being consumed.
+    overflow: bool,
 }
 
 impl ServerConnection {
@@ -90,6 +92,7 @@ impl ServerConnection {
             phase: Phase::AwaitVersion,
             input: InputBuffer::default(),
             output: version.to_bytes().to_vec(),
+            overflow: false,
         }
     }
 
@@ -107,7 +110,9 @@ impl ServerConnection {
 
     /// Appends bytes received from the client.
     pub fn receive(&mut self, bytes: &[u8]) {
-        self.input.extend(bytes);
+        if !self.input.extend(bytes) {
+            self.overflow = true;
+        }
     }
 
     /// Takes the bytes that must be sent to the client. Call this after an
@@ -144,6 +149,15 @@ impl ServerConnection {
     pub fn transport_upgraded(&mut self) -> Result<(), ProtocolError> {
         match std::mem::replace(&mut self.phase, Phase::Closed) {
             Phase::AwaitTransportUpgrade { security, auth } => {
+                // Bytes that arrived in the clear before the upgrade must not
+                // be read as if they came through the protected channel
+                // (STARTTLS-style injection, CWE-74).
+                if !self.input.unread().is_empty() {
+                    self.phase = Phase::Closed;
+                    return Err(ProtocolError::Decode(DecodeError::Malformed(
+                        "client sent unprotected data across a transport upgrade",
+                    )));
+                }
                 self.phase = Phase::Authenticating { security, auth };
                 Ok(())
             }
@@ -196,7 +210,11 @@ impl ServerConnection {
     /// Any [`ProtocolError`]; the connection is then closed. Flush
     /// [`Self::take_output`] before dropping it.
     pub fn poll(&mut self) -> Result<Option<ServerEvent>, ProtocolError> {
-        let result = self.step();
+        let result = if self.overflow {
+            Err(overflow_error())
+        } else {
+            self.step()
+        };
         if result.is_err() {
             self.phase = Phase::Closed;
         }
@@ -382,4 +400,76 @@ enum Step {
     Event(ServerEvent),
     Progressed,
     Waiting,
+}
+
+fn overflow_error() -> ProtocolError {
+    ProtocolError::Decode(DecodeError::LimitExceeded {
+        what: "unread input",
+        len: crate::buffer::MAX_UNREAD as u64 + 1,
+        max: crate::buffer::MAX_UNREAD as u64,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::{AuthError, Authenticator};
+
+    /// Asks for TLS right away (like VeNCrypt after its subtype ack).
+    struct UpgradeNow;
+    impl Authenticator for UpgradeNow {
+        fn advance(
+            &mut self,
+            _input: &[u8],
+            _output: &mut Vec<u8>,
+        ) -> Result<(usize, AuthProgress), AuthError> {
+            Ok((0, AuthProgress::UpgradeTransport(TransportUpgrade::Tls)))
+        }
+    }
+
+    #[test]
+    fn plaintext_left_over_at_a_transport_upgrade_is_rejected() {
+        let mut server = ServerConnection::new(ServerConfig {
+            max_version: ProtocolVersion::V3_8,
+            security_types: vec![SecurityType::VeNCrypt],
+            limits: Limits::DEFAULT,
+        });
+        server.receive(&ProtocolVersion::V3_8.to_bytes());
+        server.receive(&[SecurityType::VeNCrypt.code()]);
+        assert_eq!(
+            server.poll(),
+            Ok(Some(ServerEvent::SecuritySelected(SecurityType::VeNCrypt)))
+        );
+        server
+            .start_authentication(SecurityType::VeNCrypt, Box::new(UpgradeNow))
+            .unwrap();
+        assert_eq!(
+            server.poll(),
+            Ok(Some(ServerEvent::UpgradeTransport(TransportUpgrade::Tls)))
+        );
+        // A man in the middle appends plaintext that must not be read as if it
+        // came through TLS (STARTTLS command injection).
+        server.receive(b"injected");
+        assert!(matches!(
+            server.transport_upgraded(),
+            Err(ProtocolError::Decode(DecodeError::Malformed(_)))
+        ));
+    }
+
+    #[test]
+    fn a_peer_streaming_unread_data_is_cut_off() {
+        let mut server = ServerConnection::new(ServerConfig {
+            max_version: ProtocolVersion::V3_8,
+            security_types: vec![SecurityType::None],
+            limits: Limits::DEFAULT,
+        });
+        let chunk = vec![0u8; 1024 * 1024];
+        for _ in 0..40 {
+            server.receive(&chunk);
+        }
+        assert!(matches!(
+            server.poll(),
+            Err(ProtocolError::Decode(DecodeError::LimitExceeded { .. }))
+        ));
+    }
 }

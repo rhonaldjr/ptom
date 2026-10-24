@@ -220,6 +220,21 @@ impl Store {
         }
     }
 
+    /// The saved computer whose name `label` imitates, if `label` matches a
+    /// saved computer's name but `address` is not that computer's address
+    /// (discovery spoofing: a rogue host announcing "Office-PC").
+    pub fn impersonates(&self, label: &str, address: &ServerAddress) -> Option<String> {
+        let wanted = label.trim();
+        if wanted.is_empty() {
+            return None;
+        }
+        self.vault.as_ref()?.servers().iter().find_map(|s| {
+            let same_name = s.label.trim().eq_ignore_ascii_case(wanted);
+            let same_place = s.host == address.host && s.port == address.port;
+            (same_name && !same_place).then(|| s.label.clone())
+        })
+    }
+
     /// Whether the user marked network `id` as their own (ADR-0012).
     pub fn is_trusted_network(&self, id: &str) -> bool {
         self.vault

@@ -13,5 +13,6 @@
 | [process/code-review.md](process/code-review.md) | Which personas review which changes |
 | [decisions/provisional.md](decisions/provisional.md) | Provisional decisions made during implementation, awaiting user review |
 | [testing/charters/](testing/charters/) | Q3 exploratory charters (Wayland capture, tray and tabs) |
+| [reviews/](reviews/) | Persona code-review records and their resolutions |
 | [security/threat-model.md](security/threat-model.md) | Threat model and accepted risks |
 | [testing/](testing/README.md) | Test strategy and exploratory charters |

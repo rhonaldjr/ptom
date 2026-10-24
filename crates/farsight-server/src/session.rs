@@ -28,8 +28,8 @@ use farsight_rfb::auth::TransportUpgrade;
 use farsight_rfb::handshake::ServerInit;
 use farsight_rfb::server::{ServerConfig, ServerConnection, ServerEvent};
 use farsight_rfb::{
-    ClientMessage, CutText, Encoding, Limits, PixelFormat, ProtocolError, ProtocolVersion,
-    SecurityType, ServerMessage,
+    ClientMessage, CutText, DecodeError, Encoding, Limits, PixelFormat, ProtocolError,
+    ProtocolVersion, SecurityType, ServerMessage,
 };
 use farsight_security::ra2::Ra2ServerKey;
 use secrecy::SecretString;
@@ -228,6 +228,7 @@ pub struct ServerSession {
     update: Option<UpdateState>,
     clipboard_serial: u64,
     last_clipboard_in: Option<String>,
+    premature_input: bool,
 }
 
 impl ServerSession {
@@ -245,6 +246,7 @@ impl ServerSession {
             ports,
             connection,
             stage: Stage::Handshake,
+            premature_input: false,
             security: None,
             verified_user: Arc::new(OnceLock::new()),
             shared: false,
@@ -255,9 +257,22 @@ impl ServerSession {
         }
     }
 
-    /// Appends bytes received from the viewer.
+    /// Appends bytes received from the viewer. A viewer must stay silent
+    /// between `ClientInit` and `ServerInit`; anything sent while it waits
+    /// for admission or approval (e.g. keystrokes queued to replay the moment
+    /// the owner clicks Allow) closes the connection.
     pub fn receive(&mut self, bytes: &[u8]) {
+        if !bytes.is_empty() && self.awaiting_decision() {
+            self.premature_input = true;
+            return;
+        }
         self.connection.receive(bytes);
+    }
+
+    /// Whether the viewer waits for the sharing check or the approval prompt.
+    #[must_use]
+    pub fn awaiting_decision(&self) -> bool {
+        matches!(self.stage, Stage::AwaitAdmission | Stage::AwaitApproval)
     }
 
     /// Takes the bytes to send to the viewer.
@@ -344,6 +359,11 @@ impl ServerSession {
     fn drain(&mut self) -> Result<(), ProtocolError> {
         if matches!(self.stage, Stage::Closed) {
             return Ok(());
+        }
+        if self.premature_input {
+            return Err(ProtocolError::Decode(DecodeError::Malformed(
+                "viewer sent data before it was admitted",
+            )));
         }
         while let Some(event) = self.connection.poll()? {
             match event {

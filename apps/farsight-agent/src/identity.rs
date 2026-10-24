@@ -36,32 +36,44 @@ impl Identity {
             .mode(0o700)
             .create(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
-        let (cert_pem, key_pem) = if let (Ok(cert), Ok(key)) = (
-            fs::read_to_string(dir.join(CERT_FILE)),
-            fs::read_to_string(dir.join(KEY_FILE)),
-        ) {
-            (cert, key)
-        } else {
-            {
+        // DirBuilder's mode only applies when it creates the directory.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+                .with_context(|| format!("restricting {}", dir.display()))?;
+        }
+        let (cert_path, key_path) = (dir.join(CERT_FILE), dir.join(KEY_FILE));
+        // Never replace an identity silently: every viewer would then see
+        // "identity changed" and learn to click through it. Generate only on
+        // first run (both files absent); anything else is an error to fix.
+        let (cert_pem, key_pem) = match (cert_path.exists(), key_path.exists()) {
+            (false, false) => {
                 let names = vec![host_name.to_owned(), "localhost".to_owned()];
                 let generated = rcgen::generate_simple_self_signed(names)
                     .context("generating the TLS certificate")?;
                 let cert = generated.cert.pem();
                 let key = generated.signing_key.serialize_pem();
-                write_private(&dir.join(KEY_FILE), key.as_bytes())?;
-                write_private(&dir.join(CERT_FILE), cert.as_bytes())?;
+                write_private(&key_path, key.as_bytes())?;
+                write_private(&cert_path, cert.as_bytes())?;
                 (cert, key)
             }
+            _ => (
+                fs::read_to_string(&cert_path)
+                    .with_context(|| format!("reading {}", cert_path.display()))?,
+                fs::read_to_string(&key_path)
+                    .with_context(|| format!("reading {}", key_path.display()))?,
+            ),
         };
-        let ra2 = if let Ok(der) = fs::read(dir.join(RSA_FILE)) {
+        let rsa_path = dir.join(RSA_FILE);
+        let ra2 = if rsa_path.exists() {
+            let der =
+                fs::read(&rsa_path).with_context(|| format!("reading {}", rsa_path.display()))?;
             Ra2ServerKey::from_pkcs8(&der).map_err(|e| anyhow::anyhow!(e.reason))?
         } else {
-            {
-                let key = Ra2ServerKey::generate().map_err(|e| anyhow::anyhow!(e.reason))?;
-                let der = key.to_pkcs8().map_err(|e| anyhow::anyhow!(e.reason))?;
-                write_private(&dir.join(RSA_FILE), &der)?;
-                key
-            }
+            let key = Ra2ServerKey::generate().map_err(|e| anyhow::anyhow!(e.reason))?;
+            let der = key.to_pkcs8().map_err(|e| anyhow::anyhow!(e.reason))?;
+            write_private(&rsa_path, &der)?;
+            key
         };
         Ok(Self {
             cert_pem,
@@ -168,6 +180,14 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o600, "{file}");
         }
+    }
+
+    #[test]
+    fn a_half_missing_identity_is_an_error_not_a_silent_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        Identity::load_or_create(dir.path(), "test-host").unwrap();
+        fs::remove_file(dir.path().join(KEY_FILE)).unwrap();
+        assert!(Identity::load_or_create(dir.path(), "test-host").is_err());
     }
 
     #[test]

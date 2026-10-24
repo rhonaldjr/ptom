@@ -105,7 +105,19 @@ async fn run(options: AgentOptions) -> Result<()> {
         std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
         std::env::var_os("WAYLAND_DISPLAY").is_some(),
     );
-    let token_file = Identity::default_dir()?.join(identity::PORTAL_TOKEN_FILE);
+    // U-3: approval once per login. The token lives in $XDG_RUNTIME_DIR,
+    // which the session clears at logout, so a new login asks again.
+    let token_file = std::env::var_os("XDG_RUNTIME_DIR")
+        .map_or_else(std::env::temp_dir, std::path::PathBuf::from)
+        .join("farsight")
+        .join(identity::PORTAL_TOKEN_FILE);
+    if let Some(dir) = token_file.parent() {
+        use std::os::unix::fs::DirBuilderExt;
+        let _ = std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir);
+    }
     if options.forget_portal_approval {
         match std::fs::remove_file(&token_file) {
             Ok(()) => println!("Forgot the remembered screen-sharing approval."),

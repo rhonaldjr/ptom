@@ -126,6 +126,8 @@ pub struct ClientConnection {
     phase: Phase,
     input: InputBuffer,
     output: Vec<u8>,
+    /// The peer sent more than `buffer::MAX_UNREAD` without it being consumed.
+    overflow: bool,
 }
 
 impl ClientConnection {
@@ -138,6 +140,7 @@ impl ClientConnection {
             phase: Phase::AwaitVersion,
             input: InputBuffer::default(),
             output: Vec::new(),
+            overflow: false,
         }
     }
 
@@ -155,7 +158,9 @@ impl ClientConnection {
 
     /// Appends bytes received from the server.
     pub fn receive(&mut self, bytes: &[u8]) {
-        self.input.extend(bytes);
+        if !self.input.extend(bytes) {
+            self.overflow = true;
+        }
     }
 
     /// Takes the bytes that must be sent to the server.
@@ -193,6 +198,15 @@ impl ClientConnection {
     pub fn transport_upgraded(&mut self) -> Result<(), ProtocolError> {
         match std::mem::replace(&mut self.phase, Phase::Closed) {
             Phase::AwaitTransportUpgrade { security, auth } => {
+                // Bytes that arrived in the clear before the upgrade must not
+                // be read as if they came through the protected channel
+                // (STARTTLS-style injection, CWE-74).
+                if !self.input.unread().is_empty() {
+                    self.phase = Phase::Closed;
+                    return Err(ProtocolError::Decode(DecodeError::Malformed(
+                        "server sent unprotected data across a transport upgrade",
+                    )));
+                }
                 self.phase = Phase::Authenticating { security, auth };
                 Ok(())
             }
@@ -245,7 +259,11 @@ impl ClientConnection {
         &mut self,
         decoder: &mut dyn RectDecoder,
     ) -> Result<Option<ClientEvent>, ProtocolError> {
-        let result = self.step(decoder);
+        let result = if self.overflow {
+            Err(overflow_error())
+        } else {
+            self.step(decoder)
+        };
         if result.is_err() {
             self.phase = Phase::Closed;
         }
@@ -512,4 +530,12 @@ pub(crate) fn incomplete_as_none<T>(
         Err(ProtocolError::Decode(e)) if e.is_incomplete() => Ok(None),
         other => other,
     }
+}
+
+fn overflow_error() -> ProtocolError {
+    ProtocolError::Decode(DecodeError::LimitExceeded {
+        what: "unread input",
+        len: crate::buffer::MAX_UNREAD as u64 + 1,
+        max: crate::buffer::MAX_UNREAD as u64,
+    })
 }

@@ -702,13 +702,20 @@ impl App {
             .entries()
             .into_iter()
             .take(10)
-            .map(|e| TrayEntry {
-                id: e.address.display_name(),
-                label: if e.label.is_empty() {
+            .map(|e| {
+                let name = if e.label.is_empty() {
                     e.address.display_name()
                 } else {
                     e.label
-                },
+                };
+                let label = match self.store.impersonates(&name, &e.address) {
+                    Some(_) => format!("{name} (NOT your saved computer)"),
+                    None => name,
+                };
+                TrayEntry {
+                    id: e.address.display_name(),
+                    label,
+                }
             })
             .collect();
         TrayModel {
@@ -891,12 +898,16 @@ impl App {
             } else {
                 label.clone()
             };
+            let warning = self.store.impersonates(&name, &address).map(|saved| {
+                format!(" · ⚠ uses the name of your saved computer “{saved}” from a different address: probably not it")
+            });
             column = column.push(
                 widget::Row::new()
                     .push(
                         widget::text::body(format!(
-                            "{name} — {} · identity not verified · {security}",
-                            address.display_name()
+                            "{name} — {} · identity not verified · {security}{}",
+                            address.display_name(),
+                            warning.as_deref().unwrap_or_default()
                         ))
                         .width(Length::Fill),
                     )

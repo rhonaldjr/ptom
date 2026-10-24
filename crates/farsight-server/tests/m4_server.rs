@@ -646,6 +646,20 @@ fn denying_the_prompt_closes_the_connection() {
     assert!(w.server.allow(&w.desktop).is_err());
 }
 
+/// Ethical Hacker M3: keystrokes queued while the owner reads the prompt
+/// must not replay the moment Allow is clicked; the viewer is dropped instead.
+#[test]
+fn input_sent_while_awaiting_approval_closes_the_connection() {
+    let mut w = World::new(Sec::X509Plain);
+    w.auto_allow = false;
+    w.run().unwrap();
+    assert!(w.server.awaiting_decision());
+    w.server.receive(&[4, 1, 0, 0, 0, 0, 0, 0x61]); // KeyEvent 'a' down
+    assert!(w.server.poll().is_err());
+    assert!(w.server.is_closed());
+    assert!(w.server.allow(&w.desktop).is_err());
+}
+
 #[test]
 fn security_offer_follows_policy_and_material() {
     let entropy: Arc<dyn Entropy> = Arc::new(Counter(AtomicU8::new(0)));
@@ -724,6 +738,7 @@ fn connection_limit_and_exclusive_access() {
         access.admit(first_id, first.server.shared()),
         Admission::Admit { disconnect: vec![] }
     );
+    access.started(first_id);
 
     // A second viewer asking for exclusive access is refused (default policy).
     let second_id = access.connect(ip(), 0).unwrap();

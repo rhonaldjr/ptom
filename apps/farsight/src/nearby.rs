@@ -11,6 +11,9 @@ use farsight_discovery::{
     sanitize_name,
 };
 
+/// Most discovered computers kept in memory.
+const MAX_DISCOVERED: usize = 256;
+
 /// What we know about a computer's security from discovery (advisory only:
 /// a man in the middle could change it; identity is checked on connect).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,7 +61,10 @@ impl Nearby {
         match message {
             Discovery::Browse(BrowseEvent::Resolved(server))
             | Discovery::Probe(ProbeEvent::Found(server)) => {
-                self.servers.insert(server.key.clone(), server);
+                // Bounded: a host flooding mDNS with names can't grow this forever.
+                if self.servers.len() < MAX_DISCOVERED || self.servers.contains_key(&server.key) {
+                    self.servers.insert(server.key.clone(), server);
+                }
             }
             Discovery::Browse(BrowseEvent::Removed(key)) => {
                 self.servers.remove(&key);

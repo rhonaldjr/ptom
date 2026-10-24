@@ -19,7 +19,9 @@ RestartSec=5
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.config/farsight %h/.local/share/farsight
+# Only the agent's own files are writable (not its credentials, not the viewer's vault).
+# The leading '-' keeps the unit working before the directory exists.
+ReadWritePaths=-%h/.config/farsight/agent -%t/farsight
 # No PrivateTmp: the X11 backend needs /tmp/.X11-unix.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 RestrictNamespaces=yes

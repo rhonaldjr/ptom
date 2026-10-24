@@ -32,6 +32,11 @@ integrity · viewer host integrity · the local user's awareness that they are b
 | Malicious advertised names (bidi/control chars) in tray or list | `sanitize_name` strips control, bidi and invisible characters and caps length (fuzzed) | M3.5 ✅, M6 |
 | Malicious advertised names (bidi/control chars) in tray or list | Sanitise and length-cap before rendering | M3.5, M6 |
 | Desktop data leaking from the X11 backend (clipboard, keystrokes, screen) | Uses the agent user's own X connection and auth only; clipboard capped at 1 MiB both ways; clipboard text, keysyms and pixels never logged; temporary keycode remaps restored on key release and on shutdown | M5 |
+| Pre-auth slot exhaustion (idle/half-open connections, T1499) | Login deadline · caps on unadmitted connections overall and per address · write timeout ([review](../reviews/2026-10-24-agent-security-review.md)) | M4 ✅ |
+| Approval-prompt flooding / fatigue (T1621) | One prompt at a time · denial counts as a failed login · prompt names the security type | M4 ✅ |
+| Keystrokes queued during approval, replayed on Allow (T1056) | Data before `ServerInit` closes the connection | M4 ✅ |
+| STARTTLS-style plaintext injection across TLS/RA2 upgrade (CWE-74) | Upgrade refused with unread input | M3/M4 ✅ |
+| Discovery spoofing using a saved computer's name | Credentials bound to address and identity · impersonation warning in list and tray | M3.5/M6 ✅ |
 | Supply-chain compromise | cargo-deny · provenance attestations · SHA-pinned actions | M0 |
 
 ## Accepted risks
