@@ -27,6 +27,7 @@ and windows, LAN discovery of agents, and an encrypted credential vault.
 | Agent | Server core + capture backends + desktop integration; accept prompt for non-owner logins; loopback default | [0018](docs/adr/0018-agent-architecture.md) |
 | Discovery | mDNS / DNS-SD `_rfb._tcp` | [0010](docs/adr/0010-lan-discovery.md) |
 | Agent credentials | Argon2id user hashes; legacy VncAuth sealed in the keyring-backed vault; never write `~/.vnc/passwd` | [0014](docs/adr/0014-agent-credentials.md) |
+| Headless desktop details | Smithay 0.7, pixman, Xwayland 23.1+; one controller at a time; `farsight-headless@<port>` units | [0020](docs/adr/0020-headless-desktops.md) |
 | Agent advertising | Only on networks the user marked as theirs (`--trust-this-network`) | [0019](docs/adr/0019-advertise-on-trusted-networks.md) |
 | Discovery of any VNC server | Passive mDNS always on; active probing only on user-marked networks | [0012](docs/adr/0012-active-rfb-probing.md) |
 | Viewer tray icon | `ksni` (SNI) on Linux, NSStatusItem on macOS, behind a port; no-host fallback | [0013](docs/adr/0013-viewer-tray-icon.md) |
@@ -48,6 +49,7 @@ crates/            library crates, inner layers first
   farsight-desktop     ADAPTER: notifications, approval prompt, tray icons (agent presence, viewer)
   farsight-capture-x11 ADAPTER: X11 capture/input (x11rb: XDamage, MIT-SHM, XTest, XFixes)
   farsight-capture-wayland ADAPTER: portal + PipeWire capture/input (`wayland` feature; P-24)
+  farsight-headless    ADAPTER: headless Smithay compositor + Xwayland for persistent desktops (M7, ADR-0020)
 apps/              FRAMEWORKS & DRIVERS (composition roots only; thin)
   farsight             viewer (libcosmic)
   farsight-agent       agent daemon
@@ -61,7 +63,6 @@ fuzz/              cargo-fuzz targets for every parser (own workspace, nightly)
 use cases, which depend on entities. `farsight-rfb` and `farsight-codec` must not depend on tokio,
 any I/O crate, or any other workspace crate in an outer layer.
 `scripts/check-layers.sh` enforces this in CI.
-The headless compositor adapter (`farsight-headless`) is added in M7.
 
 ## Commands
 

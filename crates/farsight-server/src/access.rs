@@ -82,6 +82,14 @@ impl Default for AccessPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ConnectionId(u64);
 
+impl ConnectionId {
+    /// An id for tests elsewhere in the crate.
+    #[cfg(test)]
+    pub(crate) fn from_raw(n: u64) -> Self {
+        Self(n)
+    }
+}
+
 /// Why a connection was refused at accept time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refusal {

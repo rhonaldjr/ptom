@@ -13,6 +13,7 @@ default-members = [
   "crates/farsight-codec",
   "crates/farsight-desktop",
   "crates/farsight-discovery",
+  "crates/farsight-headless",
   "crates/farsight-net",
   "crates/farsight-rfb",
   "crates/farsight-security",
@@ -43,6 +44,7 @@ farsight-discovery = { path = "crates/farsight-discovery" }
 farsight-desktop = { path = "crates/farsight-desktop" }
 farsight-capture-x11 = { path = "crates/farsight-capture-x11" }
 farsight-capture-wayland = { path = "crates/farsight-capture-wayland" }
+farsight-headless = { path = "crates/farsight-headless" }
 
 # External
 anyhow = "1"
@@ -59,6 +61,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rustix = { version = "1", features = ["process"] }
+# Headless compositor (ADR-0006): software rendering only (pixman), no GPU, DRM or libinput.
+smithay = { version = "0.7", default-features = false, features = ["desktop", "renderer_pixman", "wayland_frontend", "xwayland"] }
+# systemd socket activation for headless desktops (M7).
+listenfd = "1"
 # Pure-Rust X11 protocol (no Xlib, no libxcb); used by farsight-capture-x11.
 x11rb = { version = "0.13", features = ["damage", "xfixes", "xtest", "shm", "randr"] }
 thiserror = "2"

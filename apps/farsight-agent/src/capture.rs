@@ -13,7 +13,8 @@ use crate::options::Backend;
 
 /// Something the desktop backend produced.
 pub enum Event {
-    Frame(Framebuffer, Option<Vec<Rect>>),
+    /// A frame, its damage, and its layout generation (0 for live desktops).
+    Frame(Framebuffer, Option<Vec<Rect>>, u64),
     Cursor(Option<Cursor>),
     Clipboard(String),
     Closed(String),
@@ -23,6 +24,7 @@ pub enum Event {
 #[derive(Clone)]
 pub enum Input {
     X11(farsight_capture_x11::InputHandle),
+    Headless(farsight_headless::Handle),
     #[cfg(feature = "wayland")]
     Wayland(farsight_capture_wayland::InputHandle),
 }
@@ -31,6 +33,7 @@ impl Input {
     pub fn key(&self, down: bool, keysym: u32) {
         match self {
             Self::X11(i) => i.key(down, keysym),
+            Self::Headless(i) => i.key(down, keysym),
             #[cfg(feature = "wayland")]
             Self::Wayland(i) => i.key(down, keysym),
         }
@@ -39,6 +42,7 @@ impl Input {
     pub fn pointer(&self, buttons: u8, x: u16, y: u16) {
         match self {
             Self::X11(i) => i.pointer(buttons, x, y),
+            Self::Headless(i) => i.pointer(buttons, x, y),
             #[cfg(feature = "wayland")]
             Self::Wayland(i) => i.pointer(buttons, x, y),
         }
@@ -47,9 +51,21 @@ impl Input {
     pub fn set_clipboard(&self, text: &str) {
         match self {
             Self::X11(i) => i.set_clipboard(text.to_owned()),
+            Self::Headless(i) => i.set_clipboard(text.to_owned()),
             // The portal has no clipboard yet (planned with the Clipboard portal).
             #[cfg(feature = "wayland")]
             Self::Wayland(_) => {}
+        }
+    }
+}
+
+impl Input {
+    /// Lets go of every key and button the desktop thinks is held, so the
+    /// next controller doesn't inherit them (U-9). Only headless desktops
+    /// change hands.
+    pub fn release_all(&self) {
+        if let Self::Headless(i) = self {
+            i.release_all();
         }
     }
 }
@@ -58,14 +74,41 @@ impl Input {
 pub struct Capture {
     pub events: mpsc::Receiver<Event>,
     pub input: Input,
+    /// Headless only: the compositor thread, joined at shutdown.
+    pub compositor: Option<std::thread::JoinHandle<()>>,
+}
+
+/// Stops a headless desktop and waits (briefly) for its session to be cleaned up.
+pub async fn shutdown(input: &Input, compositor: Option<std::thread::JoinHandle<()>>) {
+    let (Input::Headless(handle), Some(thread)) = (input, compositor) else {
+        return;
+    };
+    handle.stop();
+    let joined = tokio::task::spawn_blocking(move || thread.join());
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), joined).await;
+}
+
+/// What a headless desktop needs (M7).
+pub struct HeadlessSetup {
+    /// The umask the session's apps get (the agent itself runs with 077).
+    pub session_umask: Option<u32>,
+    pub width: u16,
+    pub height: u16,
+    pub display: Option<u32>,
+    pub startup: Option<std::path::PathBuf>,
 }
 
 /// Starts the backend for `backend` (already resolved from `Auto`).
 /// `token_file` keeps the Wayland portal approval between runs (U-3).
 #[cfg_attr(not(feature = "wayland"), allow(clippy::unused_async))]
-pub async fn start(backend: Backend, token_file: &Path) -> Result<Capture> {
+pub async fn start(
+    backend: Backend,
+    token_file: &Path,
+    headless: HeadlessSetup,
+) -> Result<Capture> {
     match backend {
         Backend::X11 | Backend::Auto => start_x11(),
+        Backend::Headless => start_headless(headless),
         #[cfg(feature = "wayland")]
         Backend::Wayland => start_wayland(token_file).await,
         #[cfg(not(feature = "wayland"))]
@@ -98,7 +141,7 @@ async fn start_wayland(token_file: &Path) -> Result<Capture> {
     tokio::spawn(async move {
         while let Some(event) = events.recv().await {
             let mapped = match event {
-                CaptureEvent::Frame(f) => Event::Frame(f.framebuffer, f.damage),
+                CaptureEvent::Frame(f) => Event::Frame(f.framebuffer, f.damage, 0),
                 CaptureEvent::Cursor(c) => Event::Cursor(
                     c.and_then(|c| Cursor::from_rgba(c.width, c.height, c.hotspot, c.rgba)),
                 ),
@@ -112,6 +155,53 @@ async fn start_wayland(token_file: &Path) -> Result<Capture> {
     Ok(Capture {
         events: rx,
         input: Input::Wayland(started.input),
+        compositor: None,
+    })
+}
+
+fn start_headless(setup: HeadlessSetup) -> Result<Capture> {
+    use farsight_headless::{HeadlessEvent, Options, start};
+    let started = start(Options {
+        width: setup.width,
+        height: setup.height,
+        x_display: setup.display,
+        xwayland: true,
+        startup: setup.startup,
+        session_umask: setup.session_umask,
+    })
+    .context("could not start the headless desktop")?;
+    let (tx, rx) = mpsc::channel(4);
+    let mut events = started.events;
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            let mapped = match event {
+                HeadlessEvent::Ready {
+                    wayland_display,
+                    x_display,
+                } => {
+                    tracing::info!(
+                        %wayland_display,
+                        x_display = x_display.as_deref().unwrap_or("none"),
+                        "headless desktop ready"
+                    );
+                    continue;
+                }
+                HeadlessEvent::Frame(f) => Event::Frame(f.framebuffer, f.damage, f.generation),
+                HeadlessEvent::Cursor(c) => Event::Cursor(
+                    c.and_then(|c| Cursor::from_rgba(c.width, c.height, c.hotspot, c.rgba)),
+                ),
+                HeadlessEvent::Clipboard(text) => Event::Clipboard(text),
+                HeadlessEvent::Closed(reason) => Event::Closed(reason),
+            };
+            if tx.send(mapped).await.is_err() {
+                return;
+            }
+        }
+    });
+    Ok(Capture {
+        events: rx,
+        input: Input::Headless(started.handle),
+        compositor: Some(started.thread),
     })
 }
 
@@ -123,7 +213,7 @@ fn start_x11() -> Result<Capture> {
     tokio::spawn(async move {
         while let Some(event) = events.recv().await {
             let mapped = match event {
-                CaptureEvent::Frame(f) => Event::Frame(f.framebuffer, f.damage),
+                CaptureEvent::Frame(f) => Event::Frame(f.framebuffer, f.damage, 0),
                 CaptureEvent::Cursor(c) => Event::Cursor(
                     c.and_then(|c| Cursor::from_rgba(c.width, c.height, c.hotspot, c.rgba)),
                 ),
@@ -138,5 +228,6 @@ fn start_x11() -> Result<Capture> {
     Ok(Capture {
         events: rx,
         input: Input::X11(started.input),
+        compositor: None,
     })
 }

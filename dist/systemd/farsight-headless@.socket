@@ -1,0 +1,13 @@
+# Starts farsight-headless@<port>.service on the first connection (M7).
+#   systemctl --user enable --now farsight-headless@5901.socket
+# Loopback only by default (U-5); for your network, replace ListenStream
+# (set `ListenStream=` empty, then one new address) with
+# `systemctl --user edit farsight-headless@5901.socket`. Only one socket is accepted.
+[Unit]
+Description=Farsight headless desktop on port %i (started on demand)
+
+[Socket]
+ListenStream=127.0.0.1:%i
+
+[Install]
+WantedBy=sockets.target

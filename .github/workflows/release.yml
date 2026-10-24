@@ -60,7 +60,7 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Install GUI build libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev && sudo bash ci/install-spa-headers.sh
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev libpixman-1-dev && sudo bash ci/install-spa-headers.sh
       - name: Stamp version
         run: |
           perl -0pi -e 's/^version = "0\.0\.0"/version = "$ENV{VERSION}"/m' Cargo.toml

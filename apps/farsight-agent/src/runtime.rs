@@ -18,12 +18,14 @@ use anyhow::{Context, Result, anyhow};
 use farsight_desktop::notify;
 use farsight_desktop::presence::Presence;
 use farsight_net::Transport;
+use farsight_rfb::Screen;
 use farsight_rfb::auth::TransportUpgrade;
 use farsight_rfb::{ProtocolError, SecurityType};
 use farsight_security::ra2::Ra2ServerKey;
 use farsight_server::{
-    AccessControl, AccessPolicy, Admission, ClipboardSink, ConnectionId, Desktop, Entropy,
-    InputSink, ServerSession, ServerSessionConfig, SessionEvent, SessionPorts, UserVerifier,
+    AccessControl, AccessPolicy, Admission, ClipboardSink, ConnectionId, Control, Decision,
+    Desktop, DesktopResizer, Entropy, InputSink, ResizeOutcome, Role, ServerSession,
+    ServerSessionConfig, SessionEvent, SessionPorts, UserVerifier,
 };
 use secrecy::SecretString;
 use tokio::net::{TcpListener, TcpStream};
@@ -39,6 +41,9 @@ use crate::capture::{Capture, Event, Input};
 const HANDSHAKE_DEADLINE: Duration = Duration::from_secs(15);
 /// Time any single write may take before the viewer is dropped.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Fewest milliseconds between two resizes of a headless desktop: dragging a
+/// viewer window sends many; each one reallocates the whole desktop.
+const MIN_RESIZE_INTERVAL_MS: u64 = 250;
 /// How long sharing stays paused after "Disconnect everyone".
 const PAUSE_AFTER_DISCONNECT_ALL: Duration = Duration::from_secs(120);
 
@@ -51,6 +56,9 @@ pub struct Settings {
     pub vnc_password: Option<SecretString>,
     pub allow_legacy: bool,
     pub view_only: bool,
+    /// A headless desktop (M7): nobody sits at it, so there's no approval
+    /// prompt, viewers can resize it, and one viewer at a time controls it (U-9).
+    pub headless: bool,
 }
 
 /// State shared by all viewer tasks.
@@ -65,6 +73,12 @@ pub struct Agent {
     prompt_open: Arc<AtomicBool>,
     presence: tokio::sync::OnceCell<Presence>,
     input: Input,
+    /// Who controls a shared headless desktop (U-9); `None` on live desktops.
+    control: Option<Mutex<Control>>,
+    /// Frames rendered before the latest resize are dropped (headless).
+    frame_generation: std::sync::atomic::AtomicU64,
+    /// When the desktop was last resized (ms since start), for rate limiting.
+    last_resize_ms: Mutex<Option<u64>>,
     started: Instant,
 }
 
@@ -86,6 +100,7 @@ async fn write(transport: &mut Transport, bytes: &[u8]) -> Result<()> {
 
 impl Agent {
     pub fn new(settings: Settings, desktop_name: String, input: Input) -> Arc<Self> {
+        let settings_headless = settings.headless;
         Arc::new(Self {
             settings,
             desktop: Mutex::new(Desktop::new(0, 0, desktop_name)),
@@ -97,6 +112,9 @@ impl Agent {
             prompt_open: Arc::new(AtomicBool::new(false)),
             presence: tokio::sync::OnceCell::new(),
             input,
+            control: settings_headless.then(|| Mutex::new(Control::default())),
+            frame_generation: std::sync::atomic::AtomicU64::new(0),
+            last_resize_ms: Mutex::new(None),
             started: Instant::now(),
         })
     }
@@ -142,6 +160,9 @@ impl Agent {
 
     async fn update_presence(&self) {
         let viewers: Vec<String> = lock(&self.viewers).values().cloned().collect();
+        if let Input::Headless(desktop) = &self.input {
+            desktop.set_viewers(viewers.len());
+        }
         if let Some(presence) = self.presence.get() {
             presence.set_viewers(viewers).await;
         }
@@ -151,7 +172,10 @@ impl Agent {
     pub async fn pump(self: Arc<Self>, mut capture: Capture) -> Result<()> {
         while let Some(event) = capture.events.recv().await {
             match event {
-                Event::Frame(framebuffer, damage) => {
+                // A frame from before the latest resize would undo it.
+                Event::Frame(_, _, generation)
+                    if generation < self.frame_generation.load(Ordering::Acquire) => {}
+                Event::Frame(framebuffer, damage, _) => {
                     lock(&self.desktop).update(framebuffer, damage.as_deref());
                     self.version.send_modify(|v| *v = v.wrapping_add(1));
                 }
@@ -208,6 +232,14 @@ impl Agent {
             _ => {}
         }
         lock(&self.access).disconnected(id);
+        if let Some(control) = &self.control {
+            let mut control = lock(control);
+            // Whatever the controller was holding down is let go (U-9).
+            if control.controller() == Some(id) {
+                self.input.release_all();
+            }
+            control.disconnected(id);
+        }
         lock(&self.tasks).remove(&id);
         let left = lock(&self.viewers).remove(&id);
         if let Some(viewer) = left {
@@ -227,6 +259,7 @@ impl Agent {
         config.vnc_password.clone_from(&self.settings.vnc_password);
         config.owner.clone_from(&self.settings.owner);
         config.view_only = self.settings.view_only;
+        config.prompt_non_owner = !self.settings.headless;
         // A view-only viewer doesn't get the desktop's clipboard either.
         config.send_clipboard = !self.settings.view_only;
         // Legacy types as documented (ADR-0018, P-26); `SecurityPolicy` still
@@ -234,7 +267,13 @@ impl Agent {
         if self.settings.vnc_password.is_some() {
             config.security_types.push(SecurityType::VncAuth);
         }
-        if loopback && self.settings.verifier.is_none() && self.settings.vnc_password.is_none() {
+        // Never on a headless desktop: nobody is there to approve (it also
+        // refuses to start without a password).
+        if loopback
+            && !self.settings.headless
+            && self.settings.verifier.is_none()
+            && self.settings.vnc_password.is_none()
+        {
             config.security_types.push(SecurityType::None);
         }
         config
@@ -246,10 +285,25 @@ impl Agent {
         stream: TcpStream,
         peer: SocketAddr,
     ) -> Result<()> {
+        let owner = Arc::new(AtomicBool::new(false));
+        let gate = Gate {
+            agent: Arc::clone(&self),
+            id,
+            owner: Arc::clone(&owner),
+        };
+        let resizer = match &self.input {
+            Input::Headless(handle) if self.settings.headless => Some(Box::new(ResizeBridge {
+                handle: handle.clone(),
+                agent: Arc::clone(&self),
+                gate: gate.clone(),
+            })
+                as Box<dyn DesktopResizer>),
+            _ => None,
+        };
         let ports = SessionPorts {
-            input: Box::new(InputBridge(self.input.clone())),
-            clipboard: Box::new(ClipboardBridge(self.input.clone())),
-            resizer: None,
+            input: Box::new(InputBridge(self.input.clone(), gate.clone())),
+            clipboard: Box::new(ClipboardBridge(self.input.clone(), gate)),
+            resizer,
         };
         let mut session = ServerSession::new(self.session_config(peer), ports);
         let mut transport = Transport::new(stream);
@@ -277,7 +331,9 @@ impl Agent {
                     Vec::new()
                 }
                 text = clipboard.recv(), if session.is_connected() => {
-                    if let Ok(text) = text {
+                    if let Ok(text) = text
+                        && self.receives_clipboard(id, owner.load(Ordering::Acquire))
+                    {
                         session.send_clipboard(&text)?;
                     }
                     Vec::new()
@@ -296,6 +352,9 @@ impl Agent {
                 }
             };
             for event in events {
+                if let SessionEvent::Connected { owner: true, .. } = &event {
+                    owner.store(true, Ordering::Release);
+                }
                 self.on_event(id, &mut session, event, &approval_tx, peer.ip())
                     .await;
             }
@@ -435,6 +494,16 @@ impl Agent {
         }
     }
 
+    /// On a shared headless desktop only the viewer in control (or the
+    /// owner) gets the desktop's clipboard: copied secrets don't reach
+    /// people who are just watching.
+    fn receives_clipboard(&self, id: ConnectionId, owner: bool) -> bool {
+        match &self.control {
+            None => true,
+            Some(control) => owner || lock(control).controller() == Some(id),
+        }
+    }
+
     /// Shows the approval prompt. Only one can be open at a time: a request
     /// while one is pending is refused and counted as a failure, so nobody can
     /// flood the person at the screen with prompts until one is accepted (T1621).
@@ -486,23 +555,101 @@ impl Entropy for OsEntropy {
     }
 }
 
-struct InputBridge(Input);
+/// Lets a viewer's input through only while it has control (U-9). Live
+/// desktops have no control rule, so everything goes through.
+#[derive(Clone)]
+struct Gate {
+    agent: Arc<Agent>,
+    id: ConnectionId,
+    /// Set once the viewer is in, if it logged in as the owner.
+    owner: Arc<AtomicBool>,
+}
 
-impl InputSink for InputBridge {
-    fn key(&mut self, down: bool, keysym: u32) {
-        self.0.key(down, keysym);
-    }
-
-    fn pointer(&mut self, buttons: u8, x: u16, y: u16) {
-        self.0.pointer(buttons, x, y);
+impl Gate {
+    fn open(&self) -> bool {
+        let Some(control) = &self.agent.control else {
+            return true;
+        };
+        let role = if self.owner.load(Ordering::Acquire) {
+            Role::Owner
+        } else {
+            Role::Guest
+        };
+        match lock(control).request(self.id, role, self.agent.now_ms()) {
+            Decision::Allowed => true,
+            Decision::TookOver { from } => {
+                info!(viewer = ?self.id, previous = ?from, "viewer took control");
+                if from.is_some() {
+                    self.agent.input.release_all();
+                }
+                true
+            }
+            Decision::Refused => false,
+        }
     }
 }
 
-struct ClipboardBridge(Input);
+struct InputBridge(Input, Gate);
+
+impl InputSink for InputBridge {
+    fn key(&mut self, down: bool, keysym: u32) {
+        if self.1.open() {
+            self.0.key(down, keysym);
+        }
+    }
+
+    fn pointer(&mut self, buttons: u8, x: u16, y: u16) {
+        if self.1.open() {
+            self.0.pointer(buttons, x, y);
+        }
+    }
+}
+
+struct ClipboardBridge(Input, Gate);
 
 impl ClipboardSink for ClipboardBridge {
     fn set_text(&mut self, text: &str) {
-        self.0.set_clipboard(text);
+        if self.1.open() {
+            self.0.set_clipboard(text);
+        }
+    }
+}
+
+/// Resizes a headless desktop when a viewer asks (`SetDesktopSize`).
+struct ResizeBridge {
+    handle: farsight_headless::Handle,
+    agent: Arc<Agent>,
+    /// Only the viewer in control may reshape the shared desktop (U-9).
+    gate: Gate,
+}
+
+impl DesktopResizer for ResizeBridge {
+    fn resize(&mut self, width: u16, height: u16, screens: &[Screen]) -> ResizeOutcome {
+        if !self.gate.open() {
+            return ResizeOutcome::Prohibited;
+        }
+        let now = self.agent.now_ms();
+        {
+            let mut last = lock(&self.agent.last_resize_ms);
+            if last.is_some_and(|at| now.saturating_sub(at) < MIN_RESIZE_INTERVAL_MS) {
+                return ResizeOutcome::OutOfResources;
+            }
+            *last = Some(now);
+        }
+        // The compositor answers within milliseconds (two seconds at most).
+        let result = tokio::task::block_in_place(|| self.handle.resize(width, height, screens));
+        match result {
+            farsight_headless::ResizeResult::Resized { generation } => {
+                self.agent
+                    .frame_generation
+                    .fetch_max(generation, Ordering::AcqRel);
+                lock(&self.agent.desktop).resize_with_screens(width, height, screens);
+                self.agent.version.send_modify(|v| *v = v.wrapping_add(1));
+                ResizeOutcome::Accepted
+            }
+            farsight_headless::ResizeResult::InvalidLayout => ResizeOutcome::InvalidLayout,
+            farsight_headless::ResizeResult::Failed => ResizeOutcome::OutOfResources,
+        }
     }
 }
 

@@ -37,6 +37,14 @@ integrity · viewer host integrity · the local user's awareness that they are b
 | Keystrokes queued during approval, replayed on Allow (T1056) | Data before `ServerInit` closes the connection | M4 ✅ |
 | STARTTLS-style plaintext injection across TLS/RA2 upgrade (CWE-74) | Upgrade refused with unread input | M3/M4 ✅ |
 | Discovery spoofing using a saved computer's name | Credentials bound to address and identity · impersonation warning in list and tray | M3.5/M6 ✅ |
+| Other local users reaching a headless desktop's X server (no X authority) | Agent umask 077 before Xwayland binds; socket then chmod 0700 (not via symlinks); no abstract socket; `/tmp/.X11-unix` must be root- or user-owned and sticky; Wayland socket in the user's 0700 runtime dir ([ADR-0020](../adr/0020-headless-desktops.md)) | M7 ✅ |
+| Unauthenticated loopback access to a headless desktop (no prompt; T1021.005) | A headless desktop refuses to start without a password and never offers None ([review](../reviews/2026-10-24-m7-headless-review.md)) | M7 ✅ |
+| Shared-session hijack: a second viewer seizes input or resizes (EH, M7 council) | One controller at a time; others' input, clipboard and resize requests refused until hand-over (idle 10 s) or the owner takes over; held keys released on hand-over (U-9, P-38) | M7 ✅ |
+| Watchers harvesting copied secrets (T1115) | On headless desktops the desktop's clipboard goes only to the controller or the owner | M7 ✅ |
+| **Accepted risk:** a controller keeps control by sending input every few seconds | Only the owner can take over then (P-38) | M7 |
+| Silent co-viewing of a headless desktop | Red frame inside the desktop whenever 2+ viewers are connected; presence tray and notifications on the user's main desktop (P-40) | M7 ✅ |
+| Resize abuse (huge or many screens → memory exhaustion) | Layout validated: ≤ 16 screens, ≤ 8192 px a side, ≤ 33.5 MP, in bounds, no overlaps; only the controller may resize; one resize per 250 ms; frames not rendered or copied while the agent is behind | M7 ✅ |
+| Apps in the session exhausting the compositor (clipboard transfers that never finish) | At most 8 transfers at once; thread-spawn failure is handled, never a panic | M7 ✅ |
 | Supply-chain compromise | cargo-deny · provenance attestations · SHA-pinned actions | M0 |
 
 ## Accepted risks

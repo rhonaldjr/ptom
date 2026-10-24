@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install GUI build libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev && sudo bash ci/install-spa-headers.sh
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev libpixman-1-dev && sudo bash ci/install-spa-headers.sh
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -43,7 +43,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install GUI build libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev xvfb && sudo bash ci/install-spa-headers.sh
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev libpixman-1-dev xvfb && sudo bash ci/install-spa-headers.sh
       - uses: Swatinem/rust-cache@v2
       - name: Test
         run: |
@@ -51,7 +51,7 @@ jobs:
             cargo test --workspace --all-features --locked
           else
             # The agent and its capture backends are Linux-only (ADR-0004); PipeWire doesn't build on macOS.
-            cargo test --workspace --locked --exclude farsight-agent --exclude farsight-capture-wayland --exclude farsight-capture-x11
+            cargo test --workspace --locked --exclude farsight-agent --exclude farsight-capture-wayland --exclude farsight-capture-x11 --exclude farsight-headless
           fi
       - name: Tray icon on a private D-Bus (with and without a host)
         if: runner.os == 'Linux'
@@ -98,9 +98,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils x11-xserver-utils
+      - run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils x11-xserver-utils libxkbcommon-dev libpixman-1-dev
       - run: cargo build -p farsight-agent -p farsight-passwd --locked
       - run: tests/e2e/agent-x11.sh
+
+  headless:
+    # M7: the headless compositor with real apps. Ubuntu 24.04 for Xwayland 23.1+
+    # (X11 apps); foot is the Wayland app in the end-to-end test.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libpixman-1-dev xwayland libegl1 foot fonts-dejavu-core
+      - name: Compositor tests (X11 window, input, resize, viewers frame, monitors)
+        run: cargo test -p farsight-headless --locked -- --nocapture
+      - run: cargo build -p farsight-agent -p farsight-passwd --locked
+      - run: tests/e2e/agent-headless.sh
 
   deny:
     runs-on: ubuntu-latest

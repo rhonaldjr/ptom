@@ -14,10 +14,12 @@
 //!   [`Desktop`].
 //! - [`AccessControl`]: per-agent connection limits, failed-login lockout
 //!   and the shared/exclusive policy.
+//! - [`Control`]: one controller at a time on shared headless desktops (U-9).
 //!
 //! Roadmap: M4 onward.
 
 pub mod access;
+pub mod control;
 pub mod damage;
 mod desktop;
 pub mod ports;
@@ -26,6 +28,7 @@ mod session;
 mod update;
 
 pub use access::{AccessControl, AccessPolicy, Admission, ConnectionId, Refusal, SharePolicy};
+pub use control::{Control, Decision, Role};
 pub use damage::Region;
 pub use desktop::Desktop;
 pub use ports::{ClipboardSink, DesktopResizer, Entropy, InputSink, ResizeOutcome, UserVerifier};

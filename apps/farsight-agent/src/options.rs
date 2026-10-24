@@ -11,6 +11,8 @@ pub enum Backend {
     Wayland,
     /// Live X11 session (M5).
     X11,
+    /// A new, persistent desktop with no screen (M7, ADR-0006).
+    Headless,
 }
 
 /// Which addresses to listen on (U-5).
@@ -36,6 +38,12 @@ pub struct AgentOptions {
     pub forget_portal_approval: bool,
     /// `--trust-this-network` (true) / `--untrust-this-network` (false).
     pub change_trust: Option<bool>,
+    /// Headless desktop size (`--geometry WxH`).
+    pub geometry: (u16, u16),
+    /// Headless display number (`:N`): X11 `DISPLAY` and port 5900+N.
+    pub display: Option<u32>,
+    /// Headless startup script (`--startup`); default in the config folder.
+    pub startup: Option<std::path::PathBuf>,
 }
 
 impl Default for AgentOptions {
@@ -50,6 +58,9 @@ impl Default for AgentOptions {
             show_identity: false,
             forget_portal_approval: false,
             change_trust: None,
+            geometry: (1920, 1080),
+            display: None,
+            startup: None,
         }
     }
 }
@@ -79,10 +90,17 @@ Usage: farsight-agent [options]
 
 Shares this desktop with Farsight and other VNC viewers.
 
-  --backend auto|wayland|x11   Desktop to share (default: from the session type)
+  --backend auto|wayland|x11|headless
+                               Desktop to share (default: from the session type).
+                               headless starts a new desktop that keeps running when
+                               nobody is connected (like TigerVNC's vncserver)
   --listen loopback|lan        Accept connections from this computer only (default)
                                or from your network (encrypted connections only)
-  --port N, -rfbport N         TCP port (default 5900)
+  --port N, -rfbport N         TCP port (default 5900, or 5900+N with --display :N)
+  --display :N                 Headless: display number (X11 DISPLAY and port 5900+N)
+  --geometry WxH               Headless: desktop size (default 1920x1080)
+  --startup FILE               Headless: script that starts your apps
+                               (default ~/.config/farsight/headless-startup)
   --view-only                  Viewers can watch but not control
   --allow-legacy               On the network, also allow unencrypted VncAuth (not recommended)
   --no-advertise               Never announce this computer on the local network
@@ -98,6 +116,7 @@ impl Command {
     /// Parses arguments (without the program name).
     pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Self, UsageError> {
         let mut o = AgentOptions::default();
+        let mut port_given = false;
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             let (name, inline) = match arg.split_once('=') {
@@ -118,6 +137,7 @@ impl Command {
                         "auto" => Backend::Auto,
                         "wayland" => Backend::Wayland,
                         "x11" => Backend::X11,
+                        "headless" => Backend::Headless,
                         other => return Err(UsageError(format!("unknown backend {other:?}"))),
                     };
                 }
@@ -133,7 +153,11 @@ impl Command {
                     o.port = v
                         .parse()
                         .map_err(|_| UsageError(format!("invalid port {v:?}")))?;
+                    port_given = true;
                 }
+                "display" => o.display = Some(parse_display(&value()?)?),
+                "geometry" => o.geometry = parse_geometry(&value()?)?,
+                "startup" => o.startup = Some(value()?.into()),
                 "view-only" | "viewonly" => o.view_only = true,
                 "allow-legacy" => o.allow_legacy = true,
                 "no-advertise" => o.advertise = false,
@@ -144,7 +168,39 @@ impl Command {
                 _ => return Err(UsageError(format!("unknown option {arg}"))),
             }
         }
+        if let Some(display) = o.display {
+            if o.backend != Backend::Headless {
+                return Err(UsageError("--display is for --backend headless".into()));
+            }
+            if !port_given {
+                o.port = u16::try_from(5900 + display)
+                    .map_err(|_| UsageError(format!("display :{display} is too large")))?;
+            }
+        }
         Ok(Self::Run(o))
+    }
+}
+
+/// `:N` or `N`, like TigerVNC (N up to 99).
+fn parse_display(text: &str) -> Result<u32, UsageError> {
+    text.trim_start_matches(':')
+        .parse()
+        .ok()
+        .filter(|n| *n <= 99)
+        .ok_or_else(|| UsageError(format!("invalid display {text:?} (use :1 to :99)")))
+}
+
+/// `WIDTHxHEIGHT`, e.g. `1920x1080`.
+fn parse_geometry(text: &str) -> Result<(u16, u16), UsageError> {
+    let invalid = || UsageError(format!("invalid geometry {text:?} (use e.g. 1920x1080)"));
+    let lower = text.to_ascii_lowercase();
+    let (w, h) = lower.split_once('x').ok_or_else(invalid)?;
+    let w: u16 = w.parse().map_err(|_| invalid())?;
+    let h: u16 = h.parse().map_err(|_| invalid())?;
+    if (1..=8192).contains(&w) && (1..=8192).contains(&h) {
+        Ok((w, h))
+    } else {
+        Err(invalid())
     }
 }
 
@@ -191,6 +247,33 @@ mod tests {
         assert!(parse(&["--listen", "everywhere"]).is_err());
         assert!(parse(&["--port"]).is_err());
         assert_eq!(parse(&["--help"]), Ok(Command::Help));
+    }
+
+    #[test]
+    fn headless_options_follow_tigervnc_conventions() {
+        let Ok(Command::Run(o)) = parse(&[
+            "--backend",
+            "headless",
+            "--display",
+            ":3",
+            "-geometry",
+            "1280x800",
+        ]) else {
+            panic!("expected Run");
+        };
+        assert_eq!(
+            (o.backend, o.display, o.port, o.geometry),
+            (Backend::Headless, Some(3), 5903, (1280, 800))
+        );
+        let Ok(Command::Run(o)) = parse(&["--backend=headless", "--display=2", "--port=6000"])
+        else {
+            panic!("expected Run");
+        };
+        assert_eq!(o.port, 6000, "an explicit port wins");
+        assert!(parse(&["--display", ":1"]).is_err(), "only for headless");
+        assert!(parse(&["--backend=headless", "--display", ":100"]).is_err());
+        assert!(parse(&["--backend=headless", "--geometry", "0x10"]).is_err());
+        assert!(parse(&["--backend=headless", "--geometry", "big"]).is_err());
     }
 
     #[test]

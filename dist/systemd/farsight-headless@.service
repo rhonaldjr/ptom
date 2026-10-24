@@ -1,0 +1,30 @@
+# Farsight headless desktop (M7, ADR-0020): a desktop that keeps running when
+# nobody is connected, like TigerVNC's vncserver@:N. The instance is the TCP
+# port; port 5901 is display :1, 5902 is :2, and so on.
+# First set a password (headless desktops refuse to start without one):
+#   farsight-passwd user add $USER
+#   systemctl --user enable --now farsight-headless@5901
+# or start it on the first connection (socket activation):
+#   systemctl --user enable --now farsight-headless@5901.socket
+# Your apps come from ~/.config/farsight/headless-startup (created the first time).
+# To allow connections from your network: systemctl --user edit farsight-headless@5901
+# and add `--listen lan` to ExecStart (with the .socket, replace its ListenStream;
+# the agent accepts exactly one socket).
+[Unit]
+Description=Farsight headless desktop on port %i
+Documentation=https://github.com/rhonaldjr/ptom
+
+[Service]
+ExecStart=/usr/bin/farsight-agent --backend headless --port %i
+Restart=on-failure
+RestartSec=5
+# Deliberately light hardening: this service is the parent of a whole
+# desktop session whose apps need your home folder, setuid helpers and JIT.
+# The agent itself still refuses to run as root (ADR-0009), keeps its own
+# files and sockets private (umask 077, the apps get 022 back) and requires a password.
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=default.target

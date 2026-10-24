@@ -42,7 +42,8 @@ EOF
       ;;
     farsight-agent)
       install -d "$dir/usr/lib/systemd/user"
-      install -m 0644 "$root/dist/systemd/farsight-agent.service" "$dir/usr/lib/systemd/user/"
+      install -m 0644 "$root/dist/systemd/farsight-agent.service" "$root/dist/systemd/farsight-headless@.service" \
+        "$root/dist/systemd/farsight-headless@.socket" "$dir/usr/lib/systemd/user/"
       ;;
   esac
 
@@ -52,6 +53,9 @@ EOF
   depends="$(cd "$work" && mkdir -p debian && printf 'Source: %s\n\nPackage: %s\nArchitecture: any\n' "$name" "$name" > debian/control &&
     dpkg-shlibdeps -O "${executables[@]}" | sed -n 's/^shlibs:Depends=//p')"
   [ -n "$extra" ] && depends="${depends:+$depends, }$extra"
+  local recommends=""
+  # Headless desktops: X11 apps (Xwayland 23.1+), a terminal, own D-Bus per desktop.
+  [ "$name" = farsight-agent ] && recommends="xwayland, libegl1, dbus-user-session | dbus-x11, foot | xterm"
 
   cat > "$dir/DEBIAN/control" <<EOF
 Package: $name
@@ -62,7 +66,8 @@ Homepage: https://github.com/rhonaldjr/ptom
 Section: net
 Priority: optional
 Depends: $depends
-Description: $summary
+${recommends:+Recommends: $recommends
+}Description: $summary
  $description
 EOF
   dpkg-deb --root-owner-group --build "$dir" "$out/${name}_${version}_${arch}.deb" >/dev/null
@@ -74,4 +79,4 @@ package farsight "Farsight remote desktop viewer (VNC)" \
   "libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libwayland-egl1, libvulkan1 | libegl1, fonts-dejavu-core | fonts-noto-core" farsight
 package farsight-agent "Farsight desktop sharing agent (VNC server)" \
   "Shares your live X11 or Wayland desktop over VNC, encrypted, with approval prompts. Replaces x0vncserver and vncpasswd." \
-  "xdg-desktop-portal" farsight-agent farsight-passwd
+  "xdg-desktop-portal, xkb-data" farsight-agent farsight-passwd

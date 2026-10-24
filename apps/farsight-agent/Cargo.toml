@@ -15,6 +15,8 @@ farsight-capture-x11.workspace = true
 farsight-capture-wayland = { workspace = true, optional = true }
 farsight-codec.workspace = true
 farsight-desktop.workspace = true
+farsight-headless.workspace = true
+listenfd.workspace = true
 farsight-discovery.workspace = true
 farsight-net.workspace = true
 farsight-rfb.workspace = true

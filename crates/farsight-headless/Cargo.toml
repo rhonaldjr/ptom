@@ -1,0 +1,27 @@
+[package]
+name = "farsight-headless"
+description = "Headless Wayland compositor (Smithay) with Xwayland for persistent remote desktops"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+farsight-codec.workspace = true
+farsight-rfb.workspace = true
+rustix = { workspace = true, features = ["process"] }
+smithay = { workspace = true }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time"] }
+tracing-subscriber.workspace = true
+x11rb.workspace = true
+
+[lints]
+workspace = true

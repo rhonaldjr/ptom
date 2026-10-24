@@ -46,6 +46,8 @@ pub struct Desktop {
     history: VecDeque<Entry>,
     clipboard: Option<String>,
     clipboard_serial: u64,
+    /// Monitor layout set by a headless desktop; empty means one screen.
+    screens: Vec<Screen>,
 }
 
 impl Desktop {
@@ -63,6 +65,7 @@ impl Desktop {
             history: VecDeque::with_capacity(HISTORY),
             clipboard: None,
             clipboard_serial: 0,
+            screens: Vec::new(),
         }
     }
 
@@ -78,9 +81,13 @@ impl Desktop {
         &self.name
     }
 
-    /// The screen layout: one screen covering the framebuffer.
+    /// The screen layout: the one set with [`Self::resize_with_screens`],
+    /// or one screen covering the framebuffer.
     #[must_use]
     pub fn screens(&self) -> Vec<Screen> {
+        if !self.screens.is_empty() {
+            return self.screens.clone();
+        }
         vec![Screen {
             id: 0,
             x: 0,
@@ -121,6 +128,11 @@ impl Desktop {
         self.framebuffer = frame;
         if resized {
             self.size_serial += 1;
+            let (width, height) = (self.framebuffer.width(), self.framebuffer.height());
+            self.screens.retain(|s| {
+                u32::from(s.x) + u32::from(s.width) <= u32::from(width)
+                    && u32::from(s.y) + u32::from(s.height) <= u32::from(height)
+            });
         }
         self.record(rects);
     }
@@ -156,7 +168,22 @@ impl Desktop {
 
     /// Resizes to `width` × `height` (cleared to black) and damages it all.
     pub fn resize(&mut self, width: u16, height: u16) {
-        self.update(Framebuffer::new(width, height), None);
+        self.resize_with_screens(width, height, &[]);
+    }
+
+    /// Resizes and records the monitor layout (`screens` must already be
+    /// validated by the adapter; empty means one screen). The size serial
+    /// changes even when only the layout does, so viewers hear about it.
+    pub fn resize_with_screens(&mut self, width: u16, height: u16, screens: &[Screen]) {
+        let same_size = (width, height) == (self.framebuffer.width(), self.framebuffer.height());
+        self.screens = screens.to_vec();
+        if same_size {
+            self.size_serial += 1;
+            let full = self.full();
+            self.record(vec![full]);
+        } else {
+            self.update(Framebuffer::new(width, height), None);
+        }
     }
 
     /// Sets the cursor shape; `None` hides the pointer on viewers that draw
@@ -285,5 +312,30 @@ mod tests {
             Changes::Rects(vec![Rect::new(0, 0, 20, 5)])
         );
         assert_eq!(d.screens()[0].width, 20);
+    }
+
+    #[test]
+    fn a_monitor_layout_is_kept_until_a_frame_no_longer_fits_it() {
+        let screen = |id, x, width| Screen {
+            id,
+            x,
+            y: 0,
+            width,
+            height: 10,
+            flags: 0,
+        };
+        let layout = [screen(1, 0, 20), screen(2, 20, 10)];
+        let mut d = Desktop::new(30, 10, "d");
+        d.resize_with_screens(30, 10, &layout);
+        assert_eq!(d.size_serial(), 1, "a new layout alone is announced");
+        assert_eq!(d.screens(), layout);
+        d.update(Framebuffer::new(30, 10), None);
+        assert_eq!(d.screens(), layout, "same-size frames keep it");
+        d.update(Framebuffer::new(25, 10), None);
+        assert_eq!(
+            d.screens(),
+            [screen(1, 0, 20)],
+            "screens that no longer fit go"
+        );
     }
 }

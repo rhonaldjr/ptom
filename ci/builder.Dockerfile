@@ -11,7 +11,7 @@ RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ca-certificates curl build-essential pkg-config cmake git jq xvfb x11-utils x11-xserver-utils bzip2 \
       libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libssl-dev \
-      libpipewire-0.3-dev libclang-dev libpixman-1-dev xwayland foot \
+      libpipewire-0.3-dev libclang-dev libpixman-1-dev xwayland libegl1 foot \
  && rm -rf /var/lib/apt/lists/* \
  && bash /tmp/install-spa-headers.sh && rm /tmp/install-spa-headers.sh \
  && curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal -c rustfmt,clippy \

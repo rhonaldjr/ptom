@@ -44,6 +44,12 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // Read (and clear) systemd's socket variables while still single-threaded.
+    let passed = listenfd::ListenFd::from_env();
+    // A headless desktop creates sockets (Xwayland's among them) that only
+    // this user may use; the session's apps get the original umask back.
+    let session_umask = (options.backend == options::Backend::Headless)
+        .then(|| rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o077)).as_raw_mode());
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -54,7 +60,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match runtime.block_on(run(options)) {
+    match runtime.block_on(run(options, passed, session_umask)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("farsight-agent: {error:#}");
@@ -63,7 +69,11 @@ fn main() -> ExitCode {
     }
 }
 
-async fn run(options: AgentOptions) -> Result<()> {
+async fn run(
+    options: AgentOptions,
+    passed: listenfd::ListenFd,
+    session_umask: Option<u32>,
+) -> Result<()> {
     if rustix::process::geteuid().is_root() {
         bail!("farsight-agent must not run as root; run it as the desktop user (ADR-0009)");
     }
@@ -73,16 +83,7 @@ async fn run(options: AgentOptions) -> Result<()> {
     let host = host_name();
     let identity = Identity::load_or_create(&Identity::default_dir()?, &host)?;
     if options.show_identity {
-        println!("Viewers connecting to this computer will see one of these fingerprints:\n");
-        println!(
-            "TLS certificate (VeNCrypt):\n{}\n",
-            format_fingerprint(&identity.tls_fingerprint()?)
-        );
-        println!(
-            "RSA key (RSA-AES):\n{}",
-            format_fingerprint(&identity.ra2.fingerprint())
-        );
-        return Ok(());
+        return show_identity(&identity);
     }
 
     let credentials = AgentCredentials::load(AgentCredentials::default_path()?)
@@ -94,8 +95,20 @@ async fn run(options: AgentOptions) -> Result<()> {
             None
         }
     };
+    // A socket handed over by systemd (socket activation) decides where we listen.
+    let (listener, listen) = open_listener(passed, options.listen, options.port).await?;
+    let port = listener.local_addr()?.port();
     let has_users = credentials.usernames().next().is_some();
-    if options.listen == Listen::Lan && !has_users && vnc_password.is_none() {
+    // A headless desktop has nobody at the screen to approve logins, so it
+    // always needs a password, even on loopback (like vncserver).
+    if options.backend == options::Backend::Headless && !has_users && vnc_password.is_none() {
+        bail!(
+            "a headless desktop needs a password, because nobody is at its screen to approve logins.\n\
+             Run `farsight-passwd user add {}` first.",
+            owner().unwrap_or_else(|| "<your-user>".into())
+        );
+    }
+    if listen == Listen::Lan && !has_users && vnc_password.is_none() {
         bail!(
             "no passwords are set up, so the agent won't accept connections from the network.\n\
              Run `farsight-passwd user add {}` first.",
@@ -109,19 +122,7 @@ async fn run(options: AgentOptions) -> Result<()> {
         std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
         std::env::var_os("WAYLAND_DISPLAY").is_some(),
     );
-    // U-3: approval once per login. The token lives in $XDG_RUNTIME_DIR,
-    // which the session clears at logout, so a new login asks again.
-    let token_file = std::env::var_os("XDG_RUNTIME_DIR")
-        .map_or_else(std::env::temp_dir, std::path::PathBuf::from)
-        .join("farsight")
-        .join(identity::PORTAL_TOKEN_FILE);
-    if let Some(dir) = token_file.parent() {
-        use std::os::unix::fs::DirBuilderExt;
-        let _ = std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir);
-    }
+    let token_file = portal_token_file();
     if options.forget_portal_approval {
         match std::fs::remove_file(&token_file) {
             Ok(()) => println!("Forgot the remembered screen-sharing approval."),
@@ -129,7 +130,10 @@ async fn run(options: AgentOptions) -> Result<()> {
         }
         return Ok(());
     }
-    let capture = capture::start(backend, &token_file).await?;
+    let headless = backend == options::Backend::Headless;
+    let mut setup = headless_setup(&options, headless, port)?;
+    setup.session_umask = session_umask;
+    let capture = capture::start(backend, &token_file, setup).await?;
     let settings = Settings {
         owner: owner(),
         tls: farsight_net::tls_acceptor(&identity.cert_pem, &identity.key_pem)?,
@@ -138,31 +142,91 @@ async fn run(options: AgentOptions) -> Result<()> {
         vnc_password,
         allow_legacy: options.allow_legacy,
         view_only: options.view_only,
+        headless,
     };
     let name = format!("{}@{host}", owner().unwrap_or_else(|| "desktop".into()));
     let agent = Agent::new(settings, name, capture.input.clone());
     agent.start_presence().await;
 
-    let listener = bind(options.listen, options.port).await?;
     info!(address = %listener.local_addr()?, ?backend, "sharing this desktop");
     // ADR-0010 + P-32: announce only when the network may connect, only on
     // networks the user marked as theirs, with a minimal TXT record.
-    if options.listen == Listen::Lan && options.advertise {
+    if listen == Listen::Lan && options.advertise {
         let config = farsight_discovery::AdvertiseConfig {
             instance_name: host.clone(),
             host_name: host.clone(),
-            port: options.port,
+            port,
             fingerprint: hex(&identity.tls_fingerprint()?),
             addresses: Vec::new(),
         };
         tokio::spawn(advertise::run(Identity::default_dir()?, config));
     }
+    let mut capture = capture;
+    let compositor = capture.compositor.take();
+    let input = capture.input.clone();
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let pump = tokio::spawn(Arc::clone(&agent).pump(capture));
-    tokio::select! {
+    let result = tokio::select! {
         result = Arc::clone(&agent).listen(listener) => result,
-        result = pump => result.context("capture task")?,
+        result = pump => result.context("capture task").and_then(|r| r),
         _ = tokio::signal::ctrl_c() => Ok(()),
+        _ = terminate.recv() => Ok(()),
+    };
+    capture::shutdown(&input, compositor).await;
+    result
+}
+
+/// The listening socket: the one systemd passed (socket activation, M7) or
+/// a new one. With a passed socket, its address decides loopback vs. LAN.
+async fn open_listener(
+    mut passed: listenfd::ListenFd,
+    listen: Listen,
+    port: u16,
+) -> Result<(TcpListener, Listen)> {
+    if passed.len() > 1 {
+        bail!(
+            "systemd passed {} sockets; use one ListenStream per unit",
+            passed.len()
+        );
     }
+    if let Some(socket) = passed
+        .take_tcp_listener(0)
+        .context("using the socket passed by systemd")?
+    {
+        socket.set_nonblocking(true)?;
+        let listener = TcpListener::from_std(socket)?;
+        let ip = listener.local_addr()?.ip();
+        let mode = if ip.is_loopback() {
+            Listen::Loopback
+        } else {
+            Listen::Lan
+        };
+        return Ok((listener, mode));
+    }
+    Ok((bind(listen, port).await?, listen))
+}
+
+/// Headless settings. Without `--display`, a socket-activated agent on port
+/// 5901–5999 uses display `:1`–`:99`, like `vncserver`.
+fn headless_setup(
+    options: &AgentOptions,
+    headless: bool,
+    port: u16,
+) -> Result<capture::HeadlessSetup> {
+    let display = options
+        .display
+        .or_else(|| (headless && (5901..=5999).contains(&port)).then(|| u32::from(port - 5900)));
+    Ok(capture::HeadlessSetup {
+        session_umask: None,
+        width: options.geometry.0,
+        height: options.geometry.1,
+        display,
+        startup: if headless {
+            Some(startup_script(options.startup.clone())?)
+        } else {
+            None
+        },
+    })
 }
 
 async fn bind(listen: Listen, port: u16) -> Result<TcpListener> {
@@ -180,6 +244,80 @@ async fn bind(listen: Listen, port: u16) -> Result<TcpListener> {
         }
         Err(error) => Err(error).with_context(|| format!("listening on port {port}")),
     }
+}
+
+fn show_identity(identity: &Identity) -> Result<()> {
+    println!("Viewers connecting to this computer will see one of these fingerprints:\n");
+    println!(
+        "TLS certificate (VeNCrypt):\n{}\n",
+        format_fingerprint(&identity.tls_fingerprint()?)
+    );
+    println!(
+        "RSA key (RSA-AES):\n{}",
+        format_fingerprint(&identity.ra2.fingerprint())
+    );
+    Ok(())
+}
+
+/// U-3: approval once per login. The token lives in `$XDG_RUNTIME_DIR`,
+/// which the session clears at logout, so a new login asks again.
+fn portal_token_file() -> std::path::PathBuf {
+    let token_file = std::env::var_os("XDG_RUNTIME_DIR")
+        .map_or_else(std::env::temp_dir, std::path::PathBuf::from)
+        .join("farsight")
+        .join(identity::PORTAL_TOKEN_FILE);
+    if let Some(dir) = token_file.parent() {
+        use std::os::unix::fs::DirBuilderExt;
+        let _ = std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir);
+    }
+    token_file
+}
+
+/// The headless startup script (U-10): the one given, or
+/// `~/.config/farsight/headless-startup`, created with the default contents
+/// (a terminal and a file manager) the first time so it can be edited.
+fn startup_script(given: Option<std::path::PathBuf>) -> Result<std::path::PathBuf> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    if let Some(path) = given {
+        check_startup_script(&path)?;
+        return Ok(path);
+    }
+    let path = Identity::default_dir()?
+        .parent()
+        .map(|config| config.join("headless-startup"))
+        .context("no config folder")?;
+    if !path.exists() {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o700)
+            .open(&path)
+            .with_context(|| format!("creating {}", path.display()))?;
+        file.write_all(farsight_headless::DEFAULT_STARTUP_SCRIPT.as_bytes())?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))?;
+        info!(script = %path.display(), "created the headless startup script; edit it to choose your apps");
+    }
+    check_startup_script(&path)?;
+    Ok(path)
+}
+
+/// The startup script runs as you every time the desktop starts, so it must
+/// be yours and writable only by you (tamper check, T1037).
+fn check_startup_script(path: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?;
+    let mine = meta.uid() == rustix::process::geteuid().as_raw();
+    if !mine || meta.mode() & 0o022 != 0 {
+        bail!(
+            "{} must belong to you and be writable only by you (try `chmod go-w`)",
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 fn hex(bytes: &[u8]) -> String {

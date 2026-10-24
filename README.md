@@ -44,7 +44,7 @@ Sharing and other VNC software.
 | ✅ M4 | Share your COSMIC / Wayland desktop |
 | ✅ M5 | Share your X11 desktop |
 | ✅ M6 | Tabs, windows and the tray icon |
-| M7 | Desktops that keep running in the background |
+| ✅ M7 | Desktops that keep running in the background |
 | M8–M10 | Speed, wider compatibility, and hardware acceleration |
 
 The full plan is in [docs/roadmap/ROADMAP.md](docs/roadmap/ROADMAP.md).
@@ -108,6 +108,27 @@ systemctl --user enable --now farsight-agent    # start sharing now and at every
   screen (it's denied after 30 seconds). A tray icon and a notification always show when someone is viewing,
   with **Disconnect everyone**.
 
+## Desktops that keep running (headless)
+
+Like TigerVNC's `vncserver`, the agent can start a **new desktop** that has no screen and keeps running when nobody is
+connected. Come back later and everything is where you left it.
+
+```bash
+farsight-passwd user add $USER                              # once, if you haven't already
+systemctl --user enable --now farsight-headless@5901         # a desktop on port 5901 (display :1)
+systemctl --user enable --now farsight-headless@5901.socket  # or: start it on the first connection
+```
+
+- Connect to it with `farsight localhost:1` (or `yourcomputer:1` once you allow your network with `--listen lan`).
+- Your apps come from `~/.config/farsight/headless-startup`. The first time, it opens a terminal and a file manager;
+  edit it to start what you like.
+- Resize the viewer window and the desktop follows. Several monitors work too.
+- Several people can watch at once, but **only one controls the mouse and keyboard**. Control passes on when that
+  person leaves or stops for 10 seconds, and you (the owner) can always take over. A red frame inside the desktop
+  shows when more than one person is connected.
+- Run one by hand with `farsight-agent --backend headless --display :1 --geometry 1920x1080`.
+- Wayland apps work everywhere; X11 apps need Xwayland 23.1 or newer (Ubuntu and Pop!_OS 24.04 and later).
+
 ## Set up passwords for a Farsight server
 
 `farsight-passwd` replaces `vncpasswd`. It never stores passwords in the weak old format:
@@ -125,7 +146,7 @@ farsight-passwd import              # bring over an existing ~/.vnc/passwd
 You need [Rust](https://rustup.rs) (the stable toolchain) and, for the viewer, a few system libraries:
 
 ```bash
-sudo apt install libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev
+sudo apt install libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpixman-1-dev
 ```
 
 Or use Docker. `scripts/docker-cargo.sh build -p farsight` builds the viewer without installing anything.
@@ -151,6 +172,8 @@ cargo test --workspace       # run the tests
   cargo test --workspace
   scripts/check-layers.sh       # needs jq
   ```
+- Headless desktop tests (need Xwayland 23.1+ for the X11 part, and foot): `cargo test -p farsight-headless` and
+  `tests/e2e/agent-headless.sh`.
 - Interop test against a real TigerVNC server:
   ```bash
   docker build -t farsight-interop-tigervnc tests/interop/tigervnc

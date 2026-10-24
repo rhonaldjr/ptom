@@ -17,7 +17,7 @@ dependencies. Milestones are scope, not dates.
 | M4 COSMIC / Wayland agent | ✅ Done (live-desktop check pending) |
 | M5 X11 agent | ✅ Done |
 | M6 Multi-session viewer, tray, advertising | ✅ Done (hand check pending) |
-| M7 Persistent headless desktops | ⬜ Not started |
+| M7 Persistent headless desktops | ✅ Done |
 | M8 Performance and full encodings | ⬜ Not started |
 | M9 Compatibility and polish | ⬜ Not started |
 | M10 GPU paths and H.264 | ⬜ Not started |
@@ -103,11 +103,16 @@ PRD-3, VWR-12, VWR-15
   labels only, sanitised ✓ · unverified entries never auto-send credentials (credentials are bound to address and identity) ✓
 - ⚠️ Not yet verified by hand on a live desktop (Q3 charter pending).
 
-## M7: Persistent headless desktops ⬜ Not started · [council](../council/2026-10-23-initial-roadmap.md#m7-headless-desktops)
+## M7: Persistent headless desktops ✅ Done · [council](../council/2026-10-23-initial-roadmap.md#m7-headless-desktops) · [ADR-0020](../adr/0020-headless-desktops.md)
 SRV-1, SRV-5, VWR-4, NET-8 (shared)
-- [ ] `farsight-headless` Smithay compositor plus Xwayland (ADR-0006) · ExtendedDesktopSize · multi-monitor layouts · shared sessions
-- [ ] socket activation · `farsight-agent@:N` units mirroring `vncserver@:N`
-- [ ] Becomes the CI compositor for end-to-end tests
+- [x] `farsight-headless` Smithay compositor plus Xwayland (ADR-0006): software rendering, startup script (U-10), clipboard both ways
+- [x] ExtendedDesktopSize resizing · multi-monitor layouts (validated, up to 16 screens)
+- [x] Shared sessions: one controller at a time, hand-over when idle, the owner can always take over (U-9, P-38)
+- [x] socket activation · `farsight-headless@<port>` units mirroring `vncserver@:N` (P-37)
+- [x] Becomes the CI compositor for end-to-end tests (`tests/e2e/agent-headless.sh`, CI job `headless`)
+- [x] **Conditions:** slice single monitor → resize → multi-monitor ✓ · in-session indicator when others join (P-40) ✓ ·
+  explicit shared-input policy (U-9) ✓
+- ⚠️ X11 apps need Xwayland 23.1+ (P-36). Not yet used by hand on a real desktop.
 
 ## M8: Performance and full encodings ⬜ Not started · [council](../council/2026-10-23-initial-roadmap.md#m8-performance--encodings)
 ENC-3, ENC-4, ENC-6, ENC-7, ENC-9, ENC-10, ENC-11, NET-7, SRV-6, PLT-4
