@@ -1863,12 +1863,14 @@ name = "farsight"
 version = "0.0.0"
 dependencies = [
  "farsight-client",
+ "farsight-desktop",
  "farsight-discovery",
  "farsight-net",
  "farsight-rfb",
  "farsight-vault",
  "libcosmic",
  "secrecy",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1960,6 +1962,7 @@ dependencies = [
  "notify-rust",
  "tokio",
  "tracing",
+ "zbus",
 ]
 
 [[package]]

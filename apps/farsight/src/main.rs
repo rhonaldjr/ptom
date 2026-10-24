@@ -6,6 +6,8 @@ mod app;
 mod keymap;
 mod nearby;
 mod store;
+mod tab;
+mod views;
 
 use std::process::ExitCode;
 

@@ -7,3 +7,4 @@
 
 pub mod notify;
 pub mod presence;
+pub mod tray;

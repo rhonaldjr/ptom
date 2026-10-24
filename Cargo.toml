@@ -46,6 +46,7 @@ farsight-capture-wayland = { path = "crates/farsight-capture-wayland" }
 
 # External
 anyhow = "1"
+zbus = { version = "5", default-features = false, features = ["async-io"] }
 rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem", "crypto"] }
 ksni = "0.3"
 notify-rust = { version = "4.18", default-features = false, features = ["z", "tokio"] }

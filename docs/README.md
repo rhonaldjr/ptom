@@ -12,6 +12,6 @@
 | [process/roadmap-council.md](process/roadmap-council.md) | How items enter the roadmap (max 3 debate rounds, then escalate) |
 | [process/code-review.md](process/code-review.md) | Which personas review which changes |
 | [decisions/provisional.md](decisions/provisional.md) | Provisional decisions made during implementation, awaiting user review |
+| [testing/charters/](testing/charters/) | Q3 exploratory charters (Wayland capture, tray and tabs) |
 | [security/threat-model.md](security/threat-model.md) | Threat model and accepted risks |
 | [testing/](testing/README.md) | Test strategy and exploratory charters |
-| [testing/charters/2026-10-24-wayland-capture.md](testing/charters/2026-10-24-wayland-capture.md) | Q3 charter: Wayland portal capture and input on COSMIC, GNOME and KDE |

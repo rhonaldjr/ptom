@@ -32,7 +32,10 @@ promote it to an ADR.
 | P-24 | 2026-10-24 | M4 | The Wayland backend is behind the `wayland` cargo feature of `farsight-agent` and outside the workspace's `default-members`: CI and Linux releases enable it; plain local `cargo build`/`test` skip it | Building it needs `libpipewire-0.3-dev`, `libclang-dev` and newer SPA headers that CI installs over the system ones (P-22): too invasive for a developer machine | Open |
 | P-25 | 2026-10-24 | M4 | The agent's "owner" (who skips the approval prompt, U-2) is the `$USER`/`$LOGNAME` account running it | The agent always runs as the desktop user (ADR-0009), so this is that user | Open |
 | P-26 | 2026-10-24 | M4 | With `--listen lan` the agent refuses to start until a password exists (`farsight-passwd user add …`); on loopback with no passwords it offers None, but every such viewer needs the on-screen approval | Never expose an unauthenticated desktop to the network | Open |
-| P-27 | 2026-10-24 | M4 | With `--listen lan` the agent binds `[::]` (IPv4 + IPv6), falling back to `0.0.0.0` | Works on IPv4-only and dual-stack hosts | Open |
+| P-27 | 2026-10-24 | M4 | With `--listen lan` the agent binds `[::]` (IPv4 + IPv6), falling back to `0.0.0.0` | Works on IPv4-only and dual-stack hosts | Open || P-28 | 2026-10-24 | M6 | **Close-to-tray is deferred** (closing the main window quits as before). It was the optional last slice of the council's tray plan, default off | Keeps M6 to the agreed core; easy to add later | Open |
+| P-29 | 2026-10-24 | M6 | A tab moves to its own window through the F8 menu ("Move to new window") rather than by dragging the tab; closing that window disconnects its session | iced has no tab drag-out; the menu is discoverable and keyboard-accessible | Open |
+| P-30 | 2026-10-24 | M6 | The tray menu shows at most 10 saved and 10 discovered computers | Keeps the menu usable; the Home tab lists everything | Open |
+| P-31 | 2026-10-24 | M6 | The agent advertises over mDNS only with `--listen lan`, unless `--no-advertise` is given; the instance name is the host name | ADR-0010 | Open |
 ## User decisions (2026-10-24, before the M3.5–M6 build)
 
 | # | Decision |

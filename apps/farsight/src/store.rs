@@ -255,3 +255,57 @@ impl Store {
             .find(|s| s.host == address.host && s.port == address.port)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[allow(clippy::unwrap_used)]
+    fn store() -> (Store, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let keys = farsight_vault::MemoryKeySource::generate().unwrap();
+        let vault = Vault::create(dir.path().join("vault.bin"), &keys).unwrap();
+        (
+            Store {
+                vault: Some(vault),
+                problem: None,
+                locked: false,
+            },
+            dir,
+        )
+    }
+
+    /// M6 council condition (rogue-agent spoofing): a computer announcing a
+    /// saved computer's name from another address gets none of its saved
+    /// credentials or trust; they are bound to the address and identity.
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn spoofed_name_at_another_address_gets_no_credentials() {
+        let (mut store, _dir) = store();
+        let office = ServerAddress {
+            host: "10.0.0.5".into(),
+            port: 5900,
+        };
+        store.remember(
+            &office,
+            "Office-PC",
+            Some((IdentityKind::Certificate, [7; 32])),
+            Some(Remember {
+                username: None,
+                password: SecretString::from("secret".to_owned()),
+            }),
+        );
+        let genuine = store.lookup(&office);
+        assert!(genuine.password.is_some());
+        assert_eq!(genuine.pinned, Some([7; 32]));
+
+        let spoofer = ServerAddress {
+            host: "10.0.0.66".into(),
+            port: 5900,
+        };
+        let known = store.lookup(&spoofer);
+        assert!(known.password.is_none());
+        assert!(known.username.is_none());
+        assert!(known.pinned.is_none());
+    }
+}

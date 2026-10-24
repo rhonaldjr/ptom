@@ -43,6 +43,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev xvfb && sudo bash ci/install-spa-headers.sh
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features --locked
+      - name: Tray icon on a private D-Bus (with and without a host)
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- env FARSIGHT_TRAY_TEST=1 cargo test -p farsight-desktop --test tray_host --locked
 
   interop:
     # Black-box interop against real TigerVNC servers (ADR-0011 allows this).

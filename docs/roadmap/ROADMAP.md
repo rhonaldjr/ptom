@@ -73,14 +73,17 @@ SRV-2, SRV-7 (XTest), SRV-10 (XDamage + polling)
 - ☑ Integration tests against Xvfb, plus an end-to-end CI job: agent on Xvfb ↔ Farsight viewer session, encrypted, owner login, pixels checked
 - ☑ **Condition:** X11 can't isolate clients from each other (any X client can inject input or read the screen); recorded in the threat model
 
-## M6: Multi-session viewer, tray icon and agent advertising · [council](../council/2026-10-23-initial-roadmap.md#m6-multi-session--discovery) · [tray council](../council/2026-10-23-tray-and-discovery.md#a-viewer-tray-icon)
+## M6: Multi-session viewer, tray icon and agent advertising ☑ · [council](../council/2026-10-23-initial-roadmap.md#m6-multi-session--discovery) · [tray council](../council/2026-10-23-tray-and-discovery.md#a-viewer-tray-icon)
 PRD-3, VWR-12, VWR-15
-- Tabs and windows, with a tab dragged out into a new window · per-session status
-- Agent-side mDNS **advertising** (ADR-0010). Browsing moved to M3.5.
-- **Tray icon** (ADR-0013), in slices: saved sessions + Quit → raise open session → discovered-servers submenu → optional close-to-tray (off by default)
-- **Conditions:** minimal TXT records · advertise only when off-loopback · rogue-agent spoof test ·
-  tray CI tests with a stub SNI watcher and with no watcher · Q3 charter per DE in the support matrix ·
-  tray shows labels only, "Unlock…" while the vault is locked · names sanitised · unverified entries never auto-send credentials
+- ☑ Tabs (a new connection opens in a tab, U-7) and windows ("Move to new window", P-29) · per-session status and input routing
+- ☑ Agent-side mDNS **advertising** (ADR-0010) with `--listen lan` (P-31). Browsing is in M3.5.
+- ☑ **Tray icon** (ADR-0013): Show, open sessions, saved computers, discovered computers (unverified), Quit; "Unlock…" while the vault is locked.
+  Close-to-tray is deferred (P-28).
+- ☑ **Conditions:** minimal TXT records ✓ · advertise only when off-loopback ✓ · rogue-agent spoof test ✓ ·
+  tray CI test on a private D-Bus with and without a host ✓ · Q3 charter per desktop:
+  [docs/testing/charters/2026-10-24-tray-and-tabs.md](../testing/charters/2026-10-24-tray-and-tabs.md) ·
+  labels only, sanitised ✓ · unverified entries never auto-send credentials (credentials are bound to address and identity) ✓
+- Not yet verified by hand on a live desktop (Q3 charter pending).
 
 ## M7: Persistent headless desktops · [council](../council/2026-10-23-initial-roadmap.md#m7-headless-desktops)
 SRV-1, SRV-5, VWR-4, NET-8 (shared)

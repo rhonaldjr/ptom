@@ -1,121 +1,92 @@
-//! The viewer window: connection dialog, prompts, and the remote desktop.
+//! The viewer shell (M6): the Home tab (unlock, connect, computers on your
+//! network), one tab per connection, tabs moved to their own windows, and the
+//! tray icon.
 //!
 //! A humble object (ADR-0002): protocol and session logic live in
-//! `farsight-client`; this module only renders state and forwards input.
+//! `farsight-client`; tabs hold per-connection UI state (`tab.rs`).
 
-use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use cosmic::app::{Core, Task};
-use cosmic::iced::futures::SinkExt;
-use cosmic::iced::keyboard::{self, Key, Location, key::Named, key::Physical};
-use cosmic::iced::{Alignment, Length, Point, Size, Subscription, event, mouse, window};
+use cosmic::iced::keyboard::{self, Key, Location, key::Physical};
+use cosmic::iced::{Alignment, Length, Size, Subscription, event, mouse, window};
 use cosmic::prelude::*;
-use cosmic::widget::{self, image};
+use cosmic::widget;
 use cosmic::{executor, iced};
-use farsight_client::{
-    Fingerprint, IdentityKind, ServerAddress, SessionConfig, SessionEvent, ViewerOptions,
-};
-use farsight_net::{Command, ConnectionHandle, CursorImage, Update};
-use farsight_rfb::SecurityType;
+use farsight_client::{ServerAddress, ViewerOptions};
+use farsight_desktop::tray::{TrayAction, TrayAvailability, TrayEntry, TrayModel, ViewerTray};
 use secrecy::SecretString;
+use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::keymap;
 use crate::nearby::{Discovery, Encryption, Nearby, NearbyEntry, Scan};
 use crate::store::{Entry, Remember, Store};
+use crate::tab::{ConnectRequest, Net, Outcome, Tab, TabId, TabMessage, connection};
+use crate::views::{centred, to_u16};
 
-/// Keysyms sent by the "Send Ctrl+Alt+Del" menu entry.
-const CTRL_ALT_DEL: [u32; 3] = [0xffe3, 0xffe9, 0xffff];
 /// Approximate height of the COSMIC header bar, in logical pixels.
 const HEADER_HEIGHT: f32 = 48.0;
-/// Wheel distance, in pixels, that counts as one notch.
-const PIXELS_PER_NOTCH: f32 = 50.0;
+/// Approximate height of the tab bar.
+const TAB_BAR_HEIGHT: f32 = 40.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Screen {
+enum Home {
     Unlock {
         creating: bool,
         error: Option<String>,
     },
     Connect,
-    Connecting,
-    Credentials {
-        username: bool,
-    },
-    Identity {
-        fingerprint: Fingerprint,
-        kind: IdentityKind,
-        changed: bool,
-    },
-    InsecureWarning(SecurityType),
-    Desktop,
     Failed(String),
 }
 
-/// What identifies one connection attempt (drives the subscription).
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-struct ConnectRequest {
-    attempt: u64,
-    host: String,
-    port: u16,
-    view_only: bool,
-    shared: bool,
-    quality: Option<u8>,
-    compress: Option<u8>,
-    allow_insecure: bool,
-    pinned: Option<Fingerprint>,
-}
+/// The running tray icon (cheap to clone into messages).
+#[derive(Clone)]
+pub struct TrayHandle(Arc<ViewerTray>);
 
-#[derive(Debug, Clone)]
-pub enum Net {
-    Ready(ConnectionHandle),
-    Update(Update),
-    Failed(String),
+impl std::fmt::Debug for TrayHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TrayHandle")
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     AddressChanged(String),
     Connect,
-    BackToStart,
     Pick(ServerAddress),
     Nearby(NearbyMessage),
     PassphraseChanged(String),
     Unlock,
     SkipUnlock,
-    UsernameChanged(String),
-    PasswordChanged(String),
-    TogglePasswordVisibility,
-    ToggleRemember(bool),
-    SubmitCredentials,
-    AcknowledgeChange(bool),
-    TrustIdentity,
-    AcceptInsecure,
-    Net(Net),
+    ShowHome,
+    Activate(TabId),
+    CloseTab(TabId),
+    Tab(TabId, TabMessage),
+    Net(TabId, Net),
     Key {
+        window: window::Id,
         pressed: bool,
         key: Key,
         modified: Key,
         physical: Physical,
         location: Location,
     },
-    PointerMoved {
-        remote: (u16, u16),
-        local: Point,
-    },
     Button {
+        window: window::Id,
         pressed: bool,
         button: mouse::Button,
     },
-    Scroll(mouse::ScrollDelta),
-    WindowFocused,
-    WindowResized(Size),
+    Scroll {
+        window: window::Id,
+        delta: mouse::ScrollDelta,
+    },
+    WindowFocused(window::Id),
+    WindowResized(window::Id, Size),
+    WindowClosed(window::Id),
     ResizeTick,
-    LocalClipboard(Option<String>),
-    ToggleMenu,
-    ToggleFullscreen,
-    ToggleViewOnly,
-    SendCtrlAltDel,
-    Disconnect,
+    LocalClipboard(window::Id, Option<String>),
+    TrayStarted(TrayHandle, TrayAvailability),
+    Tray(TrayAction),
+    Noop,
 }
 
 /// Messages for "Computers on your network".
@@ -129,47 +100,25 @@ pub enum NearbyMessage {
     Add(ServerAddress, String),
 }
 
-#[derive(Debug, Clone)]
-struct Connected {
-    name: String,
-    security: SecurityType,
-    encrypted: bool,
-}
+/// Tray picks waiting for the subscription to take them (set once at start).
+static TRAY_ACTIONS: Mutex<Option<UnboundedReceiver<TrayAction>>> = Mutex::new(None);
 
-#[allow(clippy::struct_excessive_bools)] // Independent UI toggles.
 pub struct App {
     core: Core,
     options: ViewerOptions,
-    screen: Screen,
+    home: Home,
     address_input: String,
-    username_input: String,
     passphrase_input: String,
-    password_input: String,
-    password_hidden: bool,
-    remember: bool,
-    change_acknowledged: bool,
     store: Store,
     nearby: Nearby,
     network: Option<String>,
     scan_attempt: Option<u64>,
-    target: Option<ServerAddress>,
-    stored_credentials: Option<Remember>,
-    pending_remember: Option<Remember>,
-    request: Option<ConnectRequest>,
-    attempts: u64,
-    handle: Option<ConnectionHandle>,
-    connected: Option<Connected>,
-    frame: Option<(image::Handle, u32, u32)>,
-    cursor: Option<(image::Handle, CursorImage)>,
-    local_pointer: Option<Point>,
-    pending_resize: Option<(u16, u16)>,
-    view_only: bool,
-    full_screen: bool,
-    menu_open: bool,
-    buttons: u8,
-    pointer: (u16, u16),
-    scroll_accumulator: (f32, f32),
-    pressed_keys: HashMap<Physical, u32>,
+    counter: u64,
+    tabs: Vec<Tab>,
+    /// The tab shown in the main window; `None` shows Home.
+    active: Option<TabId>,
+    tray: Option<TrayHandle>,
+    tray_model: TrayModel,
 }
 
 impl cosmic::Application for App {
@@ -190,91 +139,109 @@ impl cosmic::Application for App {
     fn init(core: Core, options: ViewerOptions) -> (Self, Task<Message>) {
         let mut app = Self {
             core,
-            address_input: options
-                .server
-                .as_ref()
-                .map(ServerAddress::display_name)
-                .unwrap_or_default(),
-            view_only: options.view_only,
-            full_screen: options.full_screen,
+            address_input: String::new(),
             options,
-            screen: Screen::Connect,
-            username_input: String::new(),
+            home: Home::Connect,
             passphrase_input: String::new(),
-            password_input: String::new(),
-            password_hidden: true,
-            remember: false,
-            change_acknowledged: false,
             store: Store::open(),
             nearby: Nearby::default(),
             network: farsight_discovery::current_networks()
                 .first()
                 .map(|n| n.as_str().to_owned()),
             scan_attempt: None,
-            target: None,
-            stored_credentials: None,
-            pending_remember: None,
-            request: None,
-            attempts: 0,
-            handle: None,
-            connected: None,
-            frame: None,
-            cursor: None,
-            local_pointer: None,
-            pending_resize: None,
-            menu_open: false,
-            buttons: 0,
-            pointer: (0, 0),
-            scroll_accumulator: (0.0, 0.0),
-            pressed_keys: HashMap::new(),
+            counter: 0,
+            tabs: Vec::new(),
+            active: None,
+            tray: None,
+            tray_model: TrayModel::default(),
         };
-        let mut tasks = vec![app.update_title()];
+        let mut tasks = vec![app.update_title(), app.start_tray()];
         app.scan_if_trusted();
         if app.store.locked() {
-            app.screen = Screen::Unlock {
+            app.home = Home::Unlock {
                 creating: !Store::exists(),
                 error: None,
             };
         } else if let Some(server) = app.options.server.clone() {
-            tasks.push(app.start(server, app.options.allow_insecure));
+            tasks.push(app.open_tab(server, app.options.allow_insecure));
         }
         (app, Task::batch(tasks))
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let mut subscriptions = vec![event::listen_with(on_event)];
-        if self.pending_resize.is_some() {
+        let mut subscriptions = vec![
+            event::listen_with(on_event),
+            window::close_events().map(Message::WindowClosed),
+            Subscription::run(crate::nearby::browse)
+                .map(|d| Message::Nearby(NearbyMessage::Discovery(d))),
+            Subscription::run(tray_actions).map(Message::Tray),
+        ];
+        if self.tabs.iter().any(|t| t.pending_resize.is_some()) {
             subscriptions.push(
                 iced::time::every(std::time::Duration::from_millis(500))
                     .map(|_| Message::ResizeTick),
             );
         }
-        subscriptions.push(
-            Subscription::run(crate::nearby::browse)
-                .map(|d| Message::Nearby(NearbyMessage::Discovery(d))),
-        );
         if let Some(attempt) = self.scan_attempt {
             subscriptions.push(
                 Subscription::run_with(attempt, crate::nearby::scan)
                     .map(|d| Message::Nearby(NearbyMessage::Discovery(d))),
             );
         }
-        if let Some(request) = &self.request {
-            subscriptions
-                .push(Subscription::run_with(request.clone(), connection).map(Message::Net));
+        for tab in &self.tabs {
+            subscriptions.push(
+                Subscription::run_with(tab.request.clone(), connection)
+                    .map(|(id, net)| Message::Net(id, net)),
+            );
         }
         Subscription::batch(subscriptions)
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.handle(message);
+        Task::batch([task, self.sync_tray()])
+    }
+
+    fn header_end(&self) -> Vec<Element<'_, Message>> {
+        match self.active_tab() {
+            Some(tab) => vec![tab.status_row()],
+            None => Vec::new(),
+        }
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        let content = match self.active_tab() {
+            Some(tab) => tab.view(false),
+            None => self.home_view(),
+        };
+        let main_tabs: Vec<&Tab> = self.tabs.iter().filter(|t| t.window.is_none()).collect();
+        let full_screen = self.active_tab().is_some_and(|t| t.full_screen);
+        if main_tabs.is_empty() || full_screen {
+            return content;
+        }
+        widget::Column::new()
+            .push(self.tab_bar(&main_tabs))
+            .push(content)
+            .into()
+    }
+
+    fn view_window(&self, id: window::Id) -> Element<'_, Message> {
+        match self.tabs.iter().find(|t| t.window == Some(id)) {
+            Some(tab) => tab.view(true),
+            None => centred(widget::text::body("This session has ended.")),
+        }
+    }
+}
+
+impl App {
+    fn handle(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::AddressChanged(text) => self.address_input = text,
             Message::Connect => match ServerAddress::parse(&self.address_input) {
-                Ok(address) => return self.start(address, self.options.allow_insecure),
-                Err(e) => self.screen = Screen::Failed(e.to_string()),
+                Ok(address) => return self.open_tab(address, self.options.allow_insecure),
+                Err(e) => self.home = Home::Failed(e.to_string()),
             },
-            Message::BackToStart | Message::Disconnect => return self.disconnect(),
-            Message::Pick(address) => return self.start(address, self.options.allow_insecure),
+            Message::Pick(address) => return self.open_tab(address, self.options.allow_insecure),
             Message::Nearby(message) => self.on_nearby(message),
             Message::PassphraseChanged(text) => self.passphrase_input = text,
             Message::Unlock => {
@@ -282,10 +249,10 @@ impl cosmic::Application for App {
                 match self.store.unlock(passphrase) {
                     Ok(()) => return self.after_unlock(),
                     Err(error) => {
-                        self.screen = Screen::Unlock {
+                        self.home = Home::Unlock {
                             creating: !Store::exists(),
                             error: Some(error),
-                        };
+                        }
                     }
                 }
             }
@@ -293,163 +260,169 @@ impl cosmic::Application for App {
                 self.store.skip();
                 return self.after_unlock();
             }
-            Message::UsernameChanged(text) => self.username_input = text,
-            Message::PasswordChanged(text) => self.password_input = text,
-            Message::TogglePasswordVisibility => self.password_hidden = !self.password_hidden,
-            Message::ToggleRemember(remember) => self.remember = remember,
-            Message::SubmitCredentials => self.submit_credentials(),
-            Message::AcknowledgeChange(acknowledged) => self.change_acknowledged = acknowledged,
-            Message::TrustIdentity => {
-                self.command(Command::ConfirmIdentity);
-                self.screen = Screen::Connecting;
+            Message::ShowHome => {
+                self.home = Home::Connect;
+                return self.activate(None);
             }
-            Message::AcceptInsecure => {
-                self.command(Command::ConsentInsecure);
-                self.screen = Screen::Connecting;
+            Message::Activate(id) => return self.activate(Some(id)),
+            Message::CloseTab(id) => return self.close_tab(id),
+            Message::Tab(id, message) => return self.on_tab_message(id, message),
+            Message::Net(id, net) => {
+                let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else {
+                    return Task::none();
+                };
+                let outcome = tab.on_net(net, &mut self.store);
+                return self.apply(id, outcome);
             }
-            Message::Net(net) => return self.on_net(net),
+            Message::Key { .. }
+            | Message::Button { .. }
+            | Message::Scroll { .. }
+            | Message::WindowFocused(_)
+            | Message::LocalClipboard(..)
+            | Message::WindowResized(..)
+            | Message::ResizeTick => return self.on_input(message),
+            Message::Noop => {}
+            Message::WindowClosed(window) => {
+                if let Some(id) = self
+                    .tabs
+                    .iter()
+                    .find(|t| t.window == Some(window))
+                    .map(|t| t.id)
+                {
+                    if let Some(tab) = self.tab_mut(id) {
+                        tab.window = None;
+                        tab.command(farsight_net::Command::Disconnect);
+                    }
+                    self.tabs.retain(|t| t.id != id);
+                }
+            }
+            Message::TrayStarted(handle, availability) => {
+                if availability == TrayAvailability::Available {
+                    self.tray = Some(handle);
+                    self.tray_model = TrayModel::default();
+                }
+            }
+            Message::Tray(action) => return self.on_tray(action),
+        }
+        Task::none()
+    }
+
+    /// Keyboard, pointer, clipboard and window-size events for the tab shown
+    /// in the window they came from.
+    fn on_input(&mut self, message: Message) -> Task<Message> {
+        match message {
             Message::Key {
+                window,
                 pressed,
                 key,
                 modified,
                 physical,
                 location,
             } => {
-                return self.on_key(pressed, &key, &modified, physical, location);
-            }
-            Message::PointerMoved { remote, local } => {
-                self.pointer = remote;
-                self.local_pointer = Some(local);
-                self.send_pointer();
-            }
-            Message::Button { pressed, button } => self.on_button(pressed, button),
-            Message::Scroll(delta) => self.on_scroll(delta),
-            Message::WindowFocused => {
-                if self.screen == Screen::Desktop {
-                    return iced::clipboard::read()
-                        .map(|text| cosmic::Action::App(Message::LocalClipboard(text)));
+                if let Some(tab) = self.tab_for_window(window) {
+                    tab.key(pressed, &key, &modified, physical, location);
                 }
             }
-            Message::WindowResized(size) => {
-                if self.options.remote_resize {
-                    // The header bar takes part of the window unless full screen.
-                    let header = if self.full_screen { 0.0 } else { HEADER_HEIGHT };
-                    self.pending_resize = Some((to_u16(size.width), to_u16(size.height - header)));
+            Message::Button {
+                window,
+                pressed,
+                button,
+            } => {
+                if let Some(tab) = self.tab_for_window(window) {
+                    tab.button(pressed, button);
                 }
             }
-            Message::ResizeTick => {
-                if let Some((width, height)) = self.pending_resize.take() {
-                    self.command(Command::Resize { width, height });
+            Message::Scroll { window, delta } => {
+                if let Some(tab) = self.tab_for_window(window) {
+                    tab.scroll(delta);
                 }
             }
-            Message::LocalClipboard(Some(text)) => self.command(Command::Clipboard(text)),
-            Message::LocalClipboard(None) => {}
-            Message::ToggleMenu => self.menu_open = !self.menu_open,
-            Message::ToggleFullscreen => {
-                self.menu_open = false;
-                return self.set_full_screen(!self.full_screen);
-            }
-            Message::ToggleViewOnly => {
-                self.view_only = !self.view_only;
-                self.command(Command::SetViewOnly(self.view_only));
-            }
-            Message::SendCtrlAltDel => {
-                self.menu_open = false;
-                for keysym in CTRL_ALT_DEL {
-                    self.command(Command::Key { down: true, keysym });
-                }
-                for keysym in CTRL_ALT_DEL.iter().rev() {
-                    self.command(Command::Key {
-                        down: false,
-                        keysym: *keysym,
+            Message::WindowFocused(window) => {
+                if self.tab_for_window(window).is_some_and(|t| t.is_desktop()) {
+                    return iced::clipboard::read().map(move |text| {
+                        cosmic::Action::App(Message::LocalClipboard(window, text))
                     });
                 }
             }
+            Message::LocalClipboard(window, Some(text)) => {
+                if let Some(tab) = self.tab_for_window(window) {
+                    tab.command(farsight_net::Command::Clipboard(text));
+                }
+            }
+            Message::WindowResized(window, size) => self.on_resized(window, size),
+            Message::ResizeTick => {
+                for tab in &mut self.tabs {
+                    if let Some((width, height)) = tab.pending_resize.take() {
+                        tab.command(farsight_net::Command::Resize { width, height });
+                    }
+                }
+            }
+            _ => {}
         }
         Task::none()
     }
 
-    fn header_end(&self) -> Vec<Element<'_, Message>> {
-        let mut items = Vec::new();
-        if let Some(connected) = &self.connected {
-            items.push(security_badge(connected));
-            if self.view_only {
-                items.push(widget::text::body("View only").into());
-            }
-            items.push(
-                widget::button::icon(widget::icon::from_name("open-menu-symbolic"))
-                    .tooltip("Viewer menu (F8)")
-                    .on_press(Message::ToggleMenu)
-                    .into(),
-            );
-        }
-        items
+    fn on_tab_message(&mut self, id: TabId, message: TabMessage) -> Task<Message> {
+        let window = self.window_of(id);
+        let Some(tab) = self.tab_mut(id) else {
+            return Task::none();
+        };
+        let outcome = tab.update(message, window);
+        self.apply(id, outcome)
     }
 
-    fn view(&self) -> Element<'_, Message> {
-        let content: Element<'_, Message> = match &self.screen {
-            Screen::Unlock { creating, error } => self.unlock_view(*creating, error.as_deref()),
-            Screen::Connect => self.connect_view(),
-            Screen::Connecting => centred(
-                widget::Column::new()
-                    .push(widget::text::title3("Connecting…"))
-                    .push(widget::button::standard("Cancel").on_press(Message::BackToStart))
-                    .spacing(12)
-                    .align_x(Alignment::Center),
-            ),
-            Screen::Credentials { username } => self.credentials_view(*username),
-            Screen::Identity {
-                fingerprint,
-                kind,
-                changed,
-            } => self.identity_view(fingerprint, *kind, *changed),
-            Screen::InsecureWarning(security) => insecure_view(*security),
-            Screen::Failed(reason) => centred(
-                widget::Column::new()
-                    .push(widget::text::title3("Couldn't connect"))
-                    .push(widget::text::body(reason.clone()))
-                    .push(widget::button::suggested("Back").on_press(Message::BackToStart))
-                    .spacing(12)
-                    .align_x(Alignment::Center),
-            ),
-            Screen::Desktop => self.desktop_view(),
-        };
-        if self.menu_open && self.screen == Screen::Desktop {
-            widget::Column::new()
-                .push(self.menu_view())
-                .push(content)
-                .into()
+    fn apply(&mut self, id: TabId, outcome: Outcome) -> Task<Message> {
+        match outcome {
+            Outcome::None => self.update_title(),
+            Outcome::Task(task) => Task::batch([task, self.update_title()]),
+            Outcome::Close => self.close_tab(id),
+            Outcome::Detach => self.detach(id),
+        }
+    }
+
+    /// The window a tab is shown in (its own, or main when it's active there).
+    fn window_of(&self, id: TabId) -> Option<window::Id> {
+        let tab = self.tabs.iter().find(|t| t.id == id)?;
+        tab.window.or_else(|| {
+            (self.active == Some(id))
+                .then(|| self.core.main_window_id())
+                .flatten()
+        })
+    }
+
+    fn tab_mut(&mut self, id: TabId) -> Option<&mut Tab> {
+        self.tabs.iter_mut().find(|t| t.id == id)
+    }
+
+    fn active_tab(&self) -> Option<&Tab> {
+        let id = self.active?;
+        self.tabs.iter().find(|t| t.id == id && t.window.is_none())
+    }
+
+    /// The tab that receives input from `window`.
+    fn tab_for_window(&mut self, window: window::Id) -> Option<&mut Tab> {
+        if self.core.main_window_id() == Some(window) {
+            let id = self.active?;
+            self.tabs
+                .iter_mut()
+                .find(|t| t.id == id && t.window.is_none())
         } else {
-            content
-        }
-    }
-}
-
-impl App {
-    fn update_title(&mut self) -> Task<Message> {
-        let title = match &self.connected {
-            Some(c) => format!("{} — Farsight", c.name),
-            None => "Farsight".to_owned(),
-        };
-        self.set_header_title(title.clone());
-        match self.core.main_window_id() {
-            Some(id) => self.set_window_title(title, id),
-            None => Task::none(),
+            self.tabs.iter_mut().find(|t| t.window == Some(window))
         }
     }
 
-    fn start(&mut self, address: ServerAddress, allow_insecure: bool) -> Task<Message> {
-        self.attempts += 1;
-        self.address_input = address.display_name();
+    fn open_tab(&mut self, address: ServerAddress, allow_insecure: bool) -> Task<Message> {
+        self.counter += 1;
+        let id = self.counter;
         let known = self.store.lookup(&address);
-        self.stored_credentials = known.password.map(|password| Remember {
+        let mut stored = known.password.map(|password| Remember {
             username: known.username,
             password,
         });
-        if let (None, Some(path)) = (&self.stored_credentials, &self.options.password_file) {
+        if let (None, Some(path)) = (&stored, &self.options.password_file) {
             match farsight_vault::legacy::read_legacy_passwd(path) {
                 Ok(password) => {
-                    self.stored_credentials = Some(Remember {
+                    stored = Some(Remember {
                         username: None,
                         password,
                     });
@@ -457,22 +430,181 @@ impl App {
                 Err(error) => tracing::warn!(%error, "could not read the password file"),
             }
         }
-        self.target = Some(address.clone());
-        self.pending_remember = None;
-        self.change_acknowledged = false;
-        self.request = Some(ConnectRequest {
-            pinned: known.pinned,
-            attempt: self.attempts,
-            host: address.host,
+        let request = ConnectRequest {
+            tab: id,
+            host: address.host.clone(),
             port: address.port,
-            view_only: self.view_only,
+            view_only: self.options.view_only,
             shared: self.options.shared,
             quality: self.options.quality,
             compress: self.options.compress,
             allow_insecure,
+            pinned: known.pinned,
+        };
+        let f8 = self.options.menu_key.eq_ignore_ascii_case("F8");
+        self.tabs.push(Tab::new(request, address, stored, f8));
+        let activate = self.activate(Some(id));
+        if self.options.full_screen {
+            let window = self.core.main_window_id();
+            if let Some(tab) = self.tab_mut(id) {
+                return Task::batch([activate, tab.set_full_screen(true, window)]);
+            }
+        }
+        activate
+    }
+
+    fn activate(&mut self, id: Option<TabId>) -> Task<Message> {
+        if let Some(previous) = self
+            .active
+            .and_then(|p| self.tabs.iter_mut().find(|t| t.id == p))
+        {
+            previous.release_keys();
+        }
+        self.active = id;
+        let full_screen = self.active_tab().is_some_and(|t| t.full_screen);
+        self.core.window.show_headerbar = !full_screen;
+        self.update_title()
+    }
+
+    fn close_tab(&mut self, id: TabId) -> Task<Message> {
+        let mut tasks = Vec::new();
+        if let Some(tab) = self.tabs.iter().find(|t| t.id == id) {
+            tab.command(farsight_net::Command::Disconnect);
+            if let Some(window) = tab.window {
+                tasks.push(window::close(window));
+            } else if tab.full_screen
+                && let Some(main) = self.core.main_window_id()
+            {
+                tasks.push(window::set_mode(main, window::Mode::Windowed));
+            }
+        }
+        self.tabs.retain(|t| t.id != id);
+        if self.active == Some(id) {
+            let next = self
+                .tabs
+                .iter()
+                .rev()
+                .find(|t| t.window.is_none())
+                .map(|t| t.id);
+            tasks.push(self.activate(next));
+        }
+        Task::batch(tasks)
+    }
+
+    /// Moves a tab into its own window (U-7).
+    fn detach(&mut self, id: TabId) -> Task<Message> {
+        let (window, open) = window::open(window::Settings {
+            size: Size::new(1280.0, 800.0),
+            ..Default::default()
         });
-        self.screen = Screen::Connecting;
-        Task::none()
+        if let Some(tab) = self.tab_mut(id) {
+            tab.window = Some(window);
+        }
+        let mut tasks = vec![open.map(|_| cosmic::Action::App(Message::Noop))];
+        if self.active == Some(id) {
+            let next = self
+                .tabs
+                .iter()
+                .rev()
+                .find(|t| t.window.is_none())
+                .map(|t| t.id);
+            tasks.push(self.activate(next));
+        }
+        Task::batch(tasks)
+    }
+
+    fn on_resized(&mut self, window: window::Id, size: Size) {
+        if !self.options.remote_resize {
+            return;
+        }
+        let is_main = self.core.main_window_id() == Some(window);
+        let tab_bar = is_main && self.tabs.iter().any(|t| t.window.is_none());
+        if let Some(tab) = self.tab_for_window(window) {
+            // The header bar and tab bar take part of the main window unless full screen.
+            let chrome = if tab.full_screen || !is_main {
+                0.0
+            } else {
+                HEADER_HEIGHT + if tab_bar { TAB_BAR_HEIGHT } else { 0.0 }
+            };
+            tab.pending_resize = Some((to_u16(size.width), to_u16(size.height - chrome)));
+        }
+    }
+
+    fn update_title(&mut self) -> Task<Message> {
+        let title = match self.active_tab() {
+            Some(tab) => format!("{} — Farsight", tab.title()),
+            None => "Farsight".to_owned(),
+        };
+        self.set_header_title(title.clone());
+        let mut tasks = Vec::new();
+        if let Some(id) = self.core.main_window_id() {
+            tasks.push(self.set_window_title(title, id));
+        }
+        let detached: Vec<(window::Id, String)> = self
+            .tabs
+            .iter()
+            .filter_map(|t| t.window.map(|w| (w, format!("{} — Farsight", t.title()))))
+            .collect();
+        for (window, title) in detached {
+            tasks.push(self.set_window_title(title, window));
+        }
+        Task::batch(tasks)
+    }
+
+    fn tab_bar(&self, tabs: &[&Tab]) -> Element<'_, Message> {
+        let mut row = widget::Row::new()
+            .spacing(4)
+            .padding(4)
+            .align_y(Alignment::Center);
+        let home = if self.active.is_none() {
+            widget::button::suggested("Home")
+        } else {
+            widget::button::standard("Home")
+        };
+        row = row.push(home.on_press(Message::ShowHome));
+        for tab in tabs {
+            let label = tab.title();
+            let button = if self.active == Some(tab.id) {
+                widget::button::suggested(label)
+            } else {
+                widget::button::standard(label)
+            };
+            row = row.push(
+                widget::Row::new()
+                    .push(button.on_press(Message::Activate(tab.id)))
+                    .push(
+                        widget::button::icon(widget::icon::from_name("window-close-symbolic"))
+                            .tooltip("Disconnect")
+                            .on_press(Message::CloseTab(tab.id)),
+                    )
+                    .align_y(Alignment::Center),
+            );
+        }
+        row.into()
+    }
+
+    fn home_view(&self) -> Element<'_, Message> {
+        match &self.home {
+            Home::Unlock { creating, error } => self.unlock_view(*creating, error.as_deref()),
+            Home::Connect => self.connect_view(),
+            Home::Failed(reason) => centred(
+                widget::Column::new()
+                    .push(widget::text::title3("Couldn't connect"))
+                    .push(widget::text::body(reason.clone()))
+                    .push(widget::button::suggested("Back").on_press(Message::ShowHome))
+                    .spacing(12)
+                    .align_x(Alignment::Center),
+            ),
+        }
+    }
+
+    fn after_unlock(&mut self) -> Task<Message> {
+        self.home = Home::Connect;
+        self.scan_if_trusted();
+        match self.options.server.clone() {
+            Some(server) => self.open_tab(server, self.options.allow_insecure),
+            None => Task::none(),
+        }
     }
 
     fn on_nearby(&mut self, message: NearbyMessage) {
@@ -521,9 +653,214 @@ impl App {
     }
 
     fn start_scan(&mut self) {
-        self.attempts += 1;
-        self.scan_attempt = Some(self.attempts);
+        self.counter += 1;
+        self.scan_attempt = Some(self.counter);
         self.nearby.scan = Some(Scan::Running { done: 0, total: 0 });
+    }
+
+    // --- Tray (ADR-0013) ---
+
+    fn start_tray(&mut self) -> Task<Message> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        *TRAY_ACTIONS.lock().unwrap_or_else(PoisonError::into_inner) = Some(rx);
+        let model = self.compute_tray_model();
+        Task::future(async move {
+            let (tray, availability) = ViewerTray::start(model, tx).await;
+            cosmic::Action::App(Message::TrayStarted(
+                TrayHandle(Arc::new(tray)),
+                availability,
+            ))
+        })
+    }
+
+    fn compute_tray_model(&self) -> TrayModel {
+        let sanitize = farsight_discovery::sanitize_name;
+        let saved = if self.store.locked() {
+            Vec::new()
+        } else {
+            self.store
+                .search("")
+                .into_iter()
+                .filter(|e| e.saved)
+                .take(10)
+                .map(|e| TrayEntry {
+                    id: e.address.display_name(),
+                    label: sanitize(&e.label),
+                })
+                .collect()
+        };
+        let open = self
+            .tabs
+            .iter()
+            .map(|t| TrayEntry {
+                id: t.id.to_string(),
+                label: sanitize(&t.title()),
+            })
+            .collect();
+        let discovered = self
+            .nearby
+            .entries()
+            .into_iter()
+            .take(10)
+            .map(|e| TrayEntry {
+                id: e.address.display_name(),
+                label: if e.label.is_empty() {
+                    e.address.display_name()
+                } else {
+                    e.label
+                },
+            })
+            .collect();
+        TrayModel {
+            saved,
+            open,
+            discovered,
+            any_unencrypted: self
+                .tabs
+                .iter()
+                .any(|t| t.connected.as_ref().is_some_and(|c| !c.encrypted)),
+            hide_discovered: false,
+            locked: self.store.locked(),
+        }
+    }
+
+    fn sync_tray(&mut self) -> Task<Message> {
+        let Some(tray) = self.tray.clone() else {
+            return Task::none();
+        };
+        let model = self.compute_tray_model();
+        if model == self.tray_model {
+            return Task::none();
+        }
+        self.tray_model = model.clone();
+        Task::future(async move {
+            tray.0.update(model).await;
+            cosmic::Action::App(Message::Noop)
+        })
+    }
+
+    fn on_tray(&mut self, action: TrayAction) -> Task<Message> {
+        match action {
+            TrayAction::Show => self.focus_main(),
+            TrayAction::Quit => iced::exit(),
+            TrayAction::Raise(id) => {
+                let Ok(id) = id.parse::<TabId>() else {
+                    return Task::none();
+                };
+                match self.tabs.iter().find(|t| t.id == id).and_then(|t| t.window) {
+                    Some(window) => window::gain_focus(window),
+                    None => Task::batch([self.activate(Some(id)), self.focus_main()]),
+                }
+            }
+            // Discovered computers go through the normal flow: identity is
+            // checked before any credentials are sent (council condition).
+            TrayAction::Connect(address) | TrayAction::Discovered(address) => {
+                match ServerAddress::parse(&address) {
+                    Ok(address) => Task::batch([
+                        self.open_tab(address, self.options.allow_insecure),
+                        self.focus_main(),
+                    ]),
+                    Err(_) => Task::none(),
+                }
+            }
+        }
+    }
+
+    fn focus_main(&self) -> Task<Message> {
+        self.core
+            .main_window_id()
+            .map_or_else(Task::none, window::gain_focus)
+    }
+
+    // --- Home views ---
+
+    fn unlock_view(&self, creating: bool, error: Option<&str>) -> Element<'_, Message> {
+        let (title, body, action) = if creating {
+            (
+                "Protect your saved computers",
+                "Your desktop has no keyring, so Farsight needs a passphrase to encrypt the computers and \
+                 passwords you save. You'll enter it each time Farsight starts.",
+                "Create",
+            )
+        } else {
+            (
+                "Unlock saved computers",
+                "Enter the passphrase that protects your saved computers.",
+                "Unlock",
+            )
+        };
+        let mut column = widget::Column::new()
+            .push(widget::text::title3(title))
+            .push(widget::text::body(body).width(Length::Fixed(480.0)))
+            .push(
+                widget::secure_input("Passphrase", &self.passphrase_input, None, true)
+                    .on_input(Message::PassphraseChanged)
+                    .on_submit(|_| Message::Unlock)
+                    .width(Length::Fixed(320.0)),
+            )
+            .spacing(12)
+            .align_x(Alignment::Center);
+        if let Some(error) = error {
+            column = column.push(widget::text::body(error.to_owned()));
+        }
+        centred(
+            column.push(
+                widget::Row::new()
+                    .push(widget::button::standard("Skip for now").on_press(Message::SkipUnlock))
+                    .push(widget::button::suggested(action).on_press(Message::Unlock))
+                    .spacing(8),
+            ),
+        )
+    }
+
+    fn connect_view(&self) -> Element<'_, Message> {
+        let mut column = widget::Column::new()
+            .push(widget::text::title2("Connect to a computer"))
+            .push(widget::text::body(
+                "Enter its name or address, for example pop-os:1 or 192.168.1.20",
+            ))
+            .push(
+                widget::search_input("Computer", &self.address_input)
+                    .on_input(Message::AddressChanged)
+                    .on_submit(|_| Message::Connect)
+                    .width(Length::Fixed(360.0)),
+            )
+            .push(widget::button::suggested("Connect").on_press(Message::Connect))
+            .spacing(12)
+            .align_x(Alignment::Center);
+        let entries = self.store.search(&self.address_input);
+        if !entries.is_empty() {
+            let mut list = widget::Column::new().spacing(4).width(Length::Fixed(360.0));
+            for Entry {
+                label,
+                address,
+                saved,
+            } in entries
+            {
+                let text = if saved {
+                    format!(
+                        "{} — {}",
+                        farsight_discovery::sanitize_name(&label),
+                        address.display_name()
+                    )
+                } else {
+                    format!("{} (recent)", address.display_name())
+                };
+                list = list.push(
+                    widget::button::text(text)
+                        .on_press(Message::Pick(address))
+                        .width(Length::Fill),
+                );
+            }
+            column = column
+                .push(widget::text::heading("Your computers"))
+                .push(list);
+        }
+        column = column.push(self.nearby_view());
+        if let Some(problem) = self.store.problem() {
+            column = column.push(widget::text::caption(problem.to_owned()));
+        }
+        centred(widget::scrollable(column))
     }
 
     fn nearby_view(&self) -> Element<'_, Message> {
@@ -589,7 +926,10 @@ impl App {
                      this network for a VNC server. Only do this on a network you own: it never sends passwords, \
                      but scanning other people's networks may break their rules.",
                 ))
-                .push(widget::button::standard("This is my network, scan it").on_press(Message::Nearby(NearbyMessage::TrustNetworkAndScan)))
+                .push(
+                    widget::button::standard("This is my network, scan it")
+                        .on_press(Message::Nearby(NearbyMessage::TrustNetworkAndScan)),
+                )
                 .spacing(6)
                 .into(),
             _ => widget::text::caption("Scanning isn't available on this network.").into(),
@@ -600,691 +940,28 @@ impl App {
         }
         column.into()
     }
-
-    fn after_unlock(&mut self) -> Task<Message> {
-        self.screen = Screen::Connect;
-        self.scan_if_trusted();
-        match self.options.server.clone() {
-            Some(server) => self.start(server, self.options.allow_insecure),
-            None => Task::none(),
-        }
-    }
-
-    fn unlock_view(&self, creating: bool, error: Option<&str>) -> Element<'_, Message> {
-        let (title, body, action) = if creating {
-            (
-                "Protect your saved computers",
-                "Your desktop has no keyring, so Farsight needs a passphrase to encrypt the computers and \
-                 passwords you save. You'll enter it each time Farsight starts.",
-                "Create",
-            )
-        } else {
-            (
-                "Unlock saved computers",
-                "Enter the passphrase that protects your saved computers.",
-                "Unlock",
-            )
-        };
-        let mut column = widget::Column::new()
-            .push(widget::text::title3(title))
-            .push(widget::text::body(body).width(Length::Fixed(480.0)))
-            .push(
-                widget::secure_input("Passphrase", &self.passphrase_input, None, true)
-                    .on_input(Message::PassphraseChanged)
-                    .on_submit(|_| Message::Unlock)
-                    .width(Length::Fixed(320.0)),
-            )
-            .spacing(12)
-            .align_x(Alignment::Center);
-        if let Some(error) = error {
-            column = column.push(widget::text::body(error.to_owned()));
-        }
-        centred(
-            column.push(
-                widget::Row::new()
-                    .push(widget::button::standard("Skip for now").on_press(Message::SkipUnlock))
-                    .push(widget::button::suggested(action).on_press(Message::Unlock))
-                    .spacing(8),
-            ),
-        )
-    }
-
-    fn submit_credentials(&mut self) {
-        let username = (!self.username_input.is_empty())
-            .then(|| SecretString::from(self.username_input.clone()));
-        let password = SecretString::from(std::mem::take(&mut self.password_input));
-        if self.remember {
-            self.pending_remember = Some(Remember {
-                username: username.clone(),
-                password: password.clone(),
-            });
-        }
-        self.command(Command::Credentials { username, password });
-        self.screen = Screen::Connecting;
-    }
-
-    fn disconnect(&mut self) -> Task<Message> {
-        self.command(Command::Disconnect);
-        self.stored_credentials = None;
-        self.pending_remember = None;
-        self.request = None;
-        self.handle = None;
-        self.connected = None;
-        self.frame = None;
-        self.cursor = None;
-        self.local_pointer = None;
-        self.menu_open = false;
-        self.screen = Screen::Connect;
-        let title = self.update_title();
-        Task::batch([title, self.set_full_screen(false)])
-    }
-
-    fn command(&self, command: Command) {
-        if let Some(handle) = &self.handle {
-            // A closed connection reports itself through `Update::Closed`.
-            let _ = handle.send(command);
-        }
-    }
-
-    fn on_net(&mut self, net: Net) -> Task<Message> {
-        match net {
-            Net::Ready(handle) => self.handle = Some(handle),
-            Net::Failed(reason) | Net::Update(Update::Closed(Some(reason))) => {
-                self.request = None;
-                self.handle = None;
-                self.connected = None;
-                self.screen = Screen::Failed(reason);
-                return self.update_title();
-            }
-            Net::Update(Update::Closed(None)) => return self.disconnect(),
-            Net::Update(Update::Frame(frame)) => {
-                self.frame = Some((
-                    image::Handle::from_rgba(frame.width, frame.height, frame.rgba),
-                    frame.width,
-                    frame.height,
-                ));
-            }
-            Net::Update(Update::Cursor(cursor)) => {
-                self.cursor = cursor.map(|c| {
-                    (
-                        image::Handle::from_rgba(c.width, c.height, c.rgba.clone()),
-                        c,
-                    )
-                });
-            }
-            Net::Update(Update::Event(event)) => return self.on_session_event(event),
-        }
-        Task::none()
-    }
-
-    fn on_session_event(&mut self, event: SessionEvent) -> Task<Message> {
-        match event {
-            SessionEvent::CredentialsRequired { username } => {
-                // Use remembered credentials once; ask if they were refused.
-                if let Some(Remember { username, password }) = self.stored_credentials.take() {
-                    self.command(Command::Credentials { username, password });
-                } else {
-                    self.screen = Screen::Credentials { username };
-                }
-            }
-            SessionEvent::IdentityConfirmationRequired {
-                fingerprint,
-                kind,
-                changed,
-            } => {
-                self.change_acknowledged = false;
-                self.screen = Screen::Identity {
-                    fingerprint,
-                    kind,
-                    changed,
-                };
-            }
-            SessionEvent::InsecureConsentRequired { security } => {
-                self.screen = Screen::InsecureWarning(security);
-            }
-            SessionEvent::Connected {
-                name,
-                security,
-                encrypted,
-                identity,
-                ..
-            } => {
-                if let Some(address) = &self.target {
-                    self.store
-                        .remember(address, &name, identity, self.pending_remember.take());
-                }
-                self.connected = Some(Connected {
-                    name,
-                    security,
-                    encrypted,
-                });
-                self.screen = Screen::Desktop;
-                let full_screen = self.set_full_screen(self.full_screen);
-                return Task::batch([self.update_title(), full_screen]);
-            }
-            SessionEvent::Clipboard(text) => return iced::clipboard::write(text),
-            SessionEvent::TransportUpgrade(_)
-            | SessionEvent::Damaged(_)
-            | SessionEvent::Resized { .. }
-            | SessionEvent::UpdateComplete
-            | SessionEvent::CursorChanged
-            | SessionEvent::Bell => {}
-        }
-        Task::none()
-    }
-
-    fn on_key(
-        &mut self,
-        pressed: bool,
-        key: &Key,
-        modified: &Key,
-        physical: Physical,
-        location: Location,
-    ) -> Task<Message> {
-        if self.screen != Screen::Desktop {
-            return Task::none();
-        }
-        if *key == Key::Named(Named::F8) && self.options.menu_key.eq_ignore_ascii_case("F8") {
-            if pressed {
-                self.menu_open = !self.menu_open;
-            }
-            return Task::none();
-        }
-        if pressed {
-            if let Some(keysym) = keymap::keysym(key, modified, location) {
-                self.pressed_keys.insert(physical, keysym);
-                self.command(Command::Key { down: true, keysym });
-            }
-        } else if let Some(keysym) = self.pressed_keys.remove(&physical) {
-            // Release with the keysym we pressed, even if modifiers changed since.
-            self.command(Command::Key {
-                down: false,
-                keysym,
-            });
-        }
-        Task::none()
-    }
-
-    fn on_button(&mut self, pressed: bool, button: mouse::Button) {
-        if self.screen != Screen::Desktop {
-            return;
-        }
-        let bit = match button {
-            mouse::Button::Left => 0,
-            mouse::Button::Middle => 1,
-            mouse::Button::Right => 2,
-            // Provisional P-2: back as button 8 until ExtendedMouseButtons (M9).
-            mouse::Button::Back => 7,
-            mouse::Button::Forward | mouse::Button::Other(_) => return,
-        };
-        if pressed {
-            self.buttons |= 1 << bit;
-        } else {
-            self.buttons &= !(1 << bit);
-        }
-        self.send_pointer();
-    }
-
-    fn on_scroll(&mut self, delta: mouse::ScrollDelta) {
-        if self.screen != Screen::Desktop {
-            return;
-        }
-        let (dx, dy) = match delta {
-            mouse::ScrollDelta::Lines { x, y } => (x, y),
-            mouse::ScrollDelta::Pixels { x, y } => (x / PIXELS_PER_NOTCH, y / PIXELS_PER_NOTCH),
-        };
-        self.scroll_accumulator.0 += dx;
-        self.scroll_accumulator.1 += dy;
-        // Buttons 4/5 scroll up/down, 6/7 scroll left/right.
-        while self.scroll_accumulator.1 >= 1.0 {
-            self.scroll_accumulator.1 -= 1.0;
-            self.click(3);
-        }
-        while self.scroll_accumulator.1 <= -1.0 {
-            self.scroll_accumulator.1 += 1.0;
-            self.click(4);
-        }
-        while self.scroll_accumulator.0 >= 1.0 {
-            self.scroll_accumulator.0 -= 1.0;
-            self.click(5);
-        }
-        while self.scroll_accumulator.0 <= -1.0 {
-            self.scroll_accumulator.0 += 1.0;
-            self.click(6);
-        }
-    }
-
-    fn click(&mut self, bit: u8) {
-        let (x, y) = self.pointer;
-        self.command(Command::Pointer {
-            buttons: self.buttons | (1 << bit),
-            x,
-            y,
-        });
-        self.command(Command::Pointer {
-            buttons: self.buttons,
-            x,
-            y,
-        });
-    }
-
-    fn send_pointer(&self) {
-        let (x, y) = self.pointer;
-        self.command(Command::Pointer {
-            buttons: self.buttons,
-            x,
-            y,
-        });
-    }
-
-    fn set_full_screen(&mut self, full_screen: bool) -> Task<Message> {
-        self.full_screen = full_screen;
-        self.core.window.show_headerbar = !full_screen;
-        let Some(id) = self.core.main_window_id() else {
-            return Task::none();
-        };
-        let mode = if full_screen {
-            window::Mode::Fullscreen
-        } else {
-            window::Mode::Windowed
-        };
-        window::set_mode(id, mode)
-    }
-
-    fn connect_view(&self) -> Element<'_, Message> {
-        let mut column = widget::Column::new()
-            .push(widget::text::title2("Connect to a computer"))
-            .push(widget::text::body(
-                "Enter its name or address, for example pop-os:1 or 192.168.1.20",
-            ))
-            .push(
-                widget::search_input("Computer", &self.address_input)
-                    .on_input(Message::AddressChanged)
-                    .on_submit(|_| Message::Connect)
-                    .width(Length::Fixed(360.0)),
-            )
-            .push(widget::button::suggested("Connect").on_press(Message::Connect))
-            .spacing(12)
-            .align_x(Alignment::Center);
-        let entries = self.store.search(&self.address_input);
-        if !entries.is_empty() {
-            let mut list = widget::Column::new().spacing(4).width(Length::Fixed(360.0));
-            for Entry {
-                label,
-                address,
-                saved,
-            } in entries
-            {
-                let text = if saved {
-                    format!("{label} — {}", address.display_name())
-                } else {
-                    format!("{} (recent)", address.display_name())
-                };
-                list = list.push(
-                    widget::button::text(text)
-                        .on_press(Message::Pick(address))
-                        .width(Length::Fill),
-                );
-            }
-            column = column
-                .push(widget::text::heading("Your computers"))
-                .push(list);
-        }
-        column = column.push(self.nearby_view());
-        if let Some(problem) = self.store.problem() {
-            column = column.push(widget::text::caption(problem.to_owned()));
-        }
-        centred(column)
-    }
-
-    fn credentials_view(&self, username: bool) -> Element<'_, Message> {
-        let mut column = widget::Column::new()
-            .push(widget::text::title3(format!(
-                "Sign in to {}",
-                self.address_input
-            )))
-            .spacing(12)
-            .align_x(Alignment::Center);
-        if username {
-            column = column.push(
-                widget::text_input("Username", &self.username_input)
-                    .on_input(Message::UsernameChanged)
-                    .width(Length::Fixed(320.0)),
-            );
-        }
-        centred(
-            column
-                .push(
-                    widget::secure_input(
-                        "Password",
-                        &self.password_input,
-                        Some(Message::TogglePasswordVisibility),
-                        self.password_hidden,
-                    )
-                    .on_input(Message::PasswordChanged)
-                    .on_submit(|_| Message::SubmitCredentials)
-                    .width(Length::Fixed(320.0)),
-                )
-                .push(
-                    widget::checkbox(self.remember)
-                        .label("Remember on this computer")
-                        .on_toggle(Message::ToggleRemember),
-                )
-                .push(
-                    widget::Row::new()
-                        .push(widget::button::standard("Cancel").on_press(Message::BackToStart))
-                        .push(
-                            widget::button::suggested("Connect")
-                                .on_press(Message::SubmitCredentials),
-                        )
-                        .spacing(8),
-                ),
-        )
-    }
-
-    fn identity_view(
-        &self,
-        fingerprint: &Fingerprint,
-        kind: IdentityKind,
-        changed: bool,
-    ) -> Element<'_, Message> {
-        let what = match kind {
-            IdentityKind::Certificate => "certificate",
-            IdentityKind::RsaKey => "key",
-        };
-        let (title, explanation) = if changed {
-            (
-                "This computer's identity has changed",
-                format!(
-                    "The {what} that {} presented is not the one you trusted before. This happens after a \
-                     reinstall, but it is also exactly what an attacker intercepting the connection looks like. \
-                     Nothing has been sent yet.",
-                    self.address_input
-                ),
-            )
-        } else {
-            (
-                "Is this the right computer?",
-                format!(
-                    "This is the first encrypted connection to {}. Check that the fingerprint below matches \
-                     the one shown on that computer, then trust it. Farsight will remember it.",
-                    self.address_input
-                ),
-            )
-        };
-        let mut column = widget::Column::new()
-            .push(
-                widget::icon::from_name(if changed {
-                    "dialog-warning-symbolic"
-                } else {
-                    "security-high-symbolic"
-                })
-                .size(48),
-            )
-            .push(widget::text::title3(title))
-            .push(widget::text::body(explanation).width(Length::Fixed(520.0)))
-            .push(widget::text::monotext(format_fingerprint(fingerprint)))
-            .spacing(12)
-            .align_x(Alignment::Center);
-        let trust = widget::button::destructive(if changed {
-            "Trust the new identity"
-        } else {
-            "Trust"
-        });
-        if changed {
-            // A changed identity takes a deliberate extra step (fingerprint fatigue).
-            column = column.push(
-                widget::checkbox(self.change_acknowledged)
-                    .label("I have checked the new fingerprint with the computer's owner")
-                    .on_toggle(Message::AcknowledgeChange),
-            );
-            let trust =
-                trust.on_press_maybe(self.change_acknowledged.then_some(Message::TrustIdentity));
-            column = column.push(
-                widget::Row::new()
-                    .push(widget::button::suggested("Disconnect").on_press(Message::BackToStart))
-                    .push(trust)
-                    .spacing(8),
-            );
-        } else {
-            column = column.push(
-                widget::Row::new()
-                    .push(widget::button::standard("Cancel").on_press(Message::BackToStart))
-                    .push(widget::button::suggested("Trust").on_press(Message::TrustIdentity))
-                    .spacing(8),
-            );
-        }
-        centred(column)
-    }
-
-    fn desktop_view(&self) -> Element<'_, Message> {
-        let Some((handle, width, height)) = self.frame.clone() else {
-            return centred(widget::text::body("Waiting for the first picture…"));
-        };
-        let cursor = self.cursor.clone();
-        let local_pointer = self.local_pointer;
-        widget::responsive(move |size: Size| {
-            let mapping = Mapping::new(size, width, height);
-            let interaction = if cursor.is_some() {
-                mouse::Interaction::Hidden
-            } else {
-                mouse::Interaction::Crosshair
-            };
-            let picture = widget::mouse_area(
-                widget::image(handle.clone())
-                    .content_fit(iced::ContentFit::Contain)
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-            )
-            .interaction(interaction)
-            .on_move(move |point| Message::PointerMoved {
-                remote: mapping.to_remote(point),
-                local: point,
-            });
-            let overlay = CursorOverlay {
-                cursor: cursor.clone(),
-                position: local_pointer,
-                scale: mapping.scale,
-            };
-            iced::widget::stack![
-                picture,
-                widget::canvas(overlay)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-            ]
-            .into()
-        })
-        .into()
-    }
-
-    fn menu_view(&self) -> Element<'_, Message> {
-        widget::Row::new()
-            .push(
-                widget::button::standard(if self.full_screen {
-                    "Leave full screen"
-                } else {
-                    "Full screen"
-                })
-                .on_press(Message::ToggleFullscreen),
-            )
-            .push(
-                widget::button::standard(if self.view_only {
-                    "Allow control"
-                } else {
-                    "View only"
-                })
-                .on_press(Message::ToggleViewOnly),
-            )
-            .push(widget::button::standard("Send Ctrl+Alt+Del").on_press(Message::SendCtrlAltDel))
-            .push(widget::button::destructive("Disconnect").on_press(Message::Disconnect))
-            .push(widget::button::text("Close menu").on_press(Message::ToggleMenu))
-            .push_maybe(self.full_screen.then(|| -> Element<'_, Message> {
-                self.connected
-                    .as_ref()
-                    .map_or_else(|| widget::text::body("").into(), security_badge)
-            }))
-            .spacing(8)
-            .padding(8)
-            .into()
-    }
 }
 
-/// Draws the remote cursor shape at the local pointer position.
-struct CursorOverlay {
-    cursor: Option<(image::Handle, CursorImage)>,
-    position: Option<Point>,
-    scale: f32,
-}
-
-impl iced::widget::canvas::Program<Message, cosmic::Theme> for CursorOverlay {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &cosmic::Renderer,
-        _theme: &cosmic::Theme,
-        bounds: iced::Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<iced::widget::canvas::Geometry> {
-        let mut frame = iced::widget::canvas::Frame::new(renderer, bounds.size());
-        if let (Some((handle, cursor)), Some(position)) = (&self.cursor, self.position) {
-            #[allow(clippy::cast_precision_loss)] // Cursors are at most 256 pixels.
-            let (w, h, hx, hy) = (
-                cursor.width as f32 * self.scale,
-                cursor.height as f32 * self.scale,
-                f32::from(cursor.hotspot.0) * self.scale,
-                f32::from(cursor.hotspot.1) * self.scale,
-            );
-            let area = iced::Rectangle::new(
-                Point::new(position.x - hx, position.y - hy),
-                Size::new(w, h),
-            );
-            frame.draw_image(area, iced::widget::canvas::Image::new(handle.clone()));
+/// Takes the tray's action receiver once and streams its picks.
+fn tray_actions() -> impl iced::futures::Stream<Item = TrayAction> {
+    iced::stream::channel(8, async move |mut output| {
+        use iced::futures::SinkExt;
+        let receiver = TRAY_ACTIONS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        let Some(mut receiver) = receiver else { return };
+        while let Some(action) = receiver.recv().await {
+            if output.send(action).await.is_err() {
+                return;
+            }
         }
-        vec![frame.into_geometry()]
-    }
-}
-
-/// Maps widget coordinates to framebuffer coordinates for a letterboxed image.
-#[derive(Debug, Clone, Copy)]
-struct Mapping {
-    scale: f32,
-    offset_x: f32,
-    offset_y: f32,
-    width: u32,
-    height: u32,
-}
-
-impl Mapping {
-    fn new(size: Size, width: u32, height: u32) -> Self {
-        #[allow(clippy::cast_precision_loss)] // Screen sizes are far below 2^24.
-        let (w, h) = (width.max(1) as f32, height.max(1) as f32);
-        let scale = (size.width / w).min(size.height / h);
-        Self {
-            scale,
-            offset_x: (size.width - w * scale) / 2.0,
-            offset_y: (size.height - h * scale) / 2.0,
-            width,
-            height,
-        }
-    }
-
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Clamped to 0..=u16::MAX first.
-    fn to_remote(self, point: Point) -> (u16, u16) {
-        let clamp = |v: f32, max: u32| -> u16 {
-            #[allow(clippy::cast_precision_loss)]
-            let max = max.saturating_sub(1).min(u32::from(u16::MAX)) as f32;
-            v.clamp(0.0, max) as u16
-        };
-        let scale = if self.scale > 0.0 { self.scale } else { 1.0 };
-        (
-            clamp((point.x - self.offset_x) / scale, self.width),
-            clamp((point.y - self.offset_y) / scale, self.height),
-        )
-    }
-}
-
-fn security_badge(connected: &Connected) -> Element<'_, Message> {
-    let (icon, label) = if connected.encrypted {
-        ("security-high-symbolic", "Encrypted".to_owned())
-    } else {
-        (
-            "security-low-symbolic",
-            format!("Not encrypted ({:?})", connected.security),
-        )
-    };
-    widget::Row::new()
-        .push(widget::icon::from_name(icon).size(16))
-        .push(widget::text::body(label))
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .into()
-}
-
-fn insecure_view(security: SecurityType) -> Element<'static, Message> {
-    let detail = match security {
-        SecurityType::None => {
-            "Anyone on the network can see and control this session, and no password is needed."
-        }
-        _ => {
-            "Anyone on the network can see everything on this screen and what you type. The password check is weak."
-        }
-    };
-    centred(
-        widget::Column::new()
-            .push(widget::icon::from_name("dialog-warning-symbolic").size(48))
-            .push(widget::text::title3("This connection is not encrypted"))
-            .push(widget::text::body(detail))
-            .push(widget::text::body(
-                "Only continue on a network you trust, such as your home network.",
-            ))
-            .push(
-                widget::Row::new()
-                    .push(widget::button::suggested("Cancel").on_press(Message::BackToStart))
-                    .push(
-                        widget::button::destructive("Connect anyway")
-                            .on_press(Message::AcceptInsecure),
-                    )
-                    .spacing(8),
-            )
-            .spacing(12)
-            .align_x(Alignment::Center),
-    )
-}
-
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Clamped to the u16 range first.
-fn to_u16(value: f32) -> u16 {
-    value.clamp(0.0, f32::from(u16::MAX)) as u16
-}
-
-/// SHA-256 as colon-separated hex, in two lines of 16 bytes.
-fn format_fingerprint(fingerprint: &Fingerprint) -> String {
-    fingerprint
-        .chunks(16)
-        .map(|half| {
-            half.iter()
-                .map(|b| format!("{b:02X}"))
-                .collect::<Vec<_>>()
-                .join(":")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn centred<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    widget::container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(Alignment::Center)
-        .align_y(Alignment::Center)
-        .padding(24)
-        .into()
+    })
 }
 
 /// Turns window events into messages. Keys already handled by a widget
 /// (e.g. typed into a text field) are not forwarded.
-fn on_event(event: event::Event, status: event::Status, _window: window::Id) -> Option<Message> {
+fn on_event(event: event::Event, status: event::Status, window: window::Id) -> Option<Message> {
     match event {
         event::Event::Keyboard(keyboard::Event::KeyPressed {
             key,
@@ -1293,6 +970,7 @@ fn on_event(event: event::Event, status: event::Status, _window: window::Id) -> 
             location,
             ..
         }) if status == event::Status::Ignored => Some(Message::Key {
+            window,
             pressed: true,
             key,
             modified: modified_key,
@@ -1306,6 +984,7 @@ fn on_event(event: event::Event, status: event::Status, _window: window::Id) -> 
             location,
             ..
         }) => Some(Message::Key {
+            window,
             pressed: false,
             key,
             modified: modified_key,
@@ -1316,56 +995,25 @@ fn on_event(event: event::Event, status: event::Status, _window: window::Id) -> 
             if status == event::Status::Ignored =>
         {
             Some(Message::Button {
+                window,
                 pressed: true,
                 button,
             })
         }
         event::Event::Mouse(mouse::Event::ButtonReleased(button)) => Some(Message::Button {
+            window,
             pressed: false,
             button,
         }),
         event::Event::Mouse(mouse::Event::WheelScrolled { delta })
             if status == event::Status::Ignored =>
         {
-            Some(Message::Scroll(delta))
+            Some(Message::Scroll { window, delta })
         }
-        event::Event::Window(window::Event::Focused) => Some(Message::WindowFocused),
-        event::Event::Window(window::Event::Resized(size)) => Some(Message::WindowResized(size)),
+        event::Event::Window(window::Event::Focused) => Some(Message::WindowFocused(window)),
+        event::Event::Window(window::Event::Resized(size)) => {
+            Some(Message::WindowResized(window, size))
+        }
         _ => None,
     }
-}
-
-/// Runs one connection and streams its progress to the app.
-fn connection(request: &ConnectRequest) -> impl iced::futures::Stream<Item = Net> + use<> {
-    let request = request.clone();
-    iced::stream::channel(64, async move |mut output| {
-        let address = ServerAddress {
-            host: request.host.clone(),
-            port: request.port,
-        };
-        let config = SessionConfig {
-            pinned_identity: request.pinned,
-            expect_encryption: request.pinned.is_some(),
-            view_only: request.view_only,
-            shared: request.shared,
-            quality: request.quality,
-            compress: request.compress,
-            allow_insecure: request.allow_insecure,
-            ..SessionConfig::default()
-        };
-        match farsight_net::connect(&address, config).await {
-            Ok((handle, mut updates)) => {
-                let _ = output.send(Net::Ready(handle)).await;
-                while let Some(update) = updates.recv().await {
-                    let closed = matches!(update, Update::Closed(_));
-                    if output.send(Net::Update(update)).await.is_err() || closed {
-                        break;
-                    }
-                }
-            }
-            Err(error) => {
-                let _ = output.send(Net::Failed(error.to_string())).await;
-            }
-        }
-    })
 }

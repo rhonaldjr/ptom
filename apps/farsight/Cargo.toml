@@ -13,12 +13,16 @@ farsight-client.workspace = true
 farsight-net.workspace = true
 farsight-rfb.workspace = true
 farsight-vault.workspace = true
+farsight-desktop.workspace = true
 farsight-discovery.workspace = true
 libcosmic.workspace = true
 secrecy.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

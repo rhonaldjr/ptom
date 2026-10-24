@@ -7,9 +7,9 @@ connect to the VNC servers you already have, and it is built to replace TigerVNC
 usually miss: finding computers automatically, keeping several desktops open at once, and keeping your
 passwords safe.
 
-> **Project status: early development.** The **viewer** works, with encrypted connections, saved computers and
-> automatic discovery. The **agent** can now share your desktop: Wayland (COSMIC, GNOME, KDE) and X11.
-> See [what's coming](#whats-coming).
+> **Project status: early development.** The **viewer** works, with tabs, a tray icon, encrypted connections,
+> saved computers and automatic discovery. The **agent** shares your desktop on Wayland (COSMIC, GNOME, KDE)
+> and X11. Persistent background desktops are next (M7). See [what's coming](#whats-coming).
 
 ---
 
@@ -43,7 +43,7 @@ Sharing and other VNC software.
 | ✅ M3.5 | Automatic discovery of the computers on your network |
 | ✅ M4 | Share your COSMIC / Wayland desktop |
 | ✅ M5 | Share your X11 desktop |
-| M6 | Tabs, windows and the tray icon |
+| ✅ M6 | Tabs, windows and the tray icon |
 | M7 | Desktops that keep running in the background |
 | M8–M10 | Speed, wider compatibility, and hardware acceleration |
 
@@ -68,7 +68,10 @@ farsight pop-os:1             # connects to display 1 on the computer "pop-os"
 farsight -ViewOnly pop-os:1   # watch without controlling
 ```
 
-- Press **F8** for the viewer menu: full screen, view only, Ctrl+Alt+Del, disconnect.
+- Each computer opens in its own **tab**. The **Home** tab lists your computers and the ones on your network.
+- Press **F8** for the viewer menu: full screen, view only, Ctrl+Alt+Del, **Move to new window**, disconnect.
+- The **tray icon** (COSMIC, KDE, Pop!_OS GNOME, Xfce) gives quick access to open sessions and saved computers.
+  Desktops without a tray, such as vanilla GNOME, have everything in the window.
 - The window header always shows whether the connection is **encrypted**. Farsight uses encryption whenever the
   server offers it (TigerVNC's X509 and RSA-AES modes). It asks before using an unencrypted connection on your network.
 - The first time you connect securely, Farsight shows the computer's **fingerprint** so you can check it, then
@@ -88,6 +91,7 @@ farsight-agent --show-identity                  # the fingerprints viewers will 
 systemctl --user enable --now farsight-agent    # start sharing now and at every login
 ```
 
+- On your network the agent announces itself, so viewers find it automatically (turn this off with `--no-advertise`).
 - By default only this computer can connect. To allow your network, run
   `systemctl --user edit farsight-agent` and add `--listen lan` to the command. Network connections are always encrypted.
 - On Wayland, your desktop asks once whether Farsight may share the screen. Farsight remembers the answer;

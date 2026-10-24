@@ -43,7 +43,10 @@ crates/            library crates, inner layers first
   farsight-server      USE CASES: agent session logic, plus ports (FrameSource, InputSink, Clipboard…)
   farsight-net         ADAPTER: tokio TCP/TLS (rustls) transports, later WebSocket
   farsight-vault       ADAPTER: encrypted credential/session store, OS keyring
-  farsight-discovery   ADAPTER: mDNS advertise/browse
+  farsight-discovery   ADAPTER: mDNS advertise/browse, opt-in RFB prober, network identity
+  farsight-desktop     ADAPTER: notifications, approval prompt, tray icons (agent presence, viewer)
+  farsight-capture-x11 ADAPTER: X11 capture/input (x11rb: XDamage, MIT-SHM, XTest, XFixes)
+  farsight-capture-wayland ADAPTER: portal + PipeWire capture/input (`wayland` feature; P-24)
 apps/              FRAMEWORKS & DRIVERS (composition roots only; thin)
   farsight             viewer (libcosmic)
   farsight-agent       agent daemon
@@ -57,8 +60,7 @@ fuzz/              cargo-fuzz targets for every parser (own workspace, nightly)
 use cases, which depend on entities. `farsight-rfb` and `farsight-codec` must not depend on tokio,
 any I/O crate, or any other workspace crate in an outer layer.
 `scripts/check-layers.sh` enforces this in CI.
-Platform capture/input adapters (`farsight-capture-wayland`, `farsight-capture-x11`, `farsight-headless`)
-are added as crates in their roadmap milestones.
+The headless compositor adapter (`farsight-headless`) is added in M7.
 
 ## Commands
 

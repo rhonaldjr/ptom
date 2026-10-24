@@ -129,6 +129,26 @@ async fn run(options: AgentOptions) -> Result<()> {
 
     let listener = bind(options.listen, options.port).await?;
     info!(address = %listener.local_addr()?, ?backend, "sharing this desktop");
+    // ADR-0010: announce only when the network may connect, with a minimal TXT
+    // record (presence + fingerprint). Kept alive for the agent's lifetime.
+    let _advertisement = if options.listen == Listen::Lan && options.advertise {
+        let config = farsight_discovery::AdvertiseConfig {
+            instance_name: host.clone(),
+            host_name: host.clone(),
+            port: options.port,
+            fingerprint: hex(&identity.tls_fingerprint()?),
+            addresses: Vec::new(),
+        };
+        match farsight_discovery::advertise(&config) {
+            Ok(advertisement) => Some(advertisement),
+            Err(error) => {
+                warn!(%error, "could not announce this computer on the network");
+                None
+            }
+        }
+    } else {
+        None
+    };
     let pump = tokio::spawn(Arc::clone(&agent).pump(capture));
     tokio::select! {
         result = Arc::clone(&agent).listen(listener) => result,
@@ -152,6 +172,16 @@ async fn bind(listen: Listen, port: u16) -> Result<TcpListener> {
         }
         Err(error) => Err(error).with_context(|| format!("listening on port {port}")),
     }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        })
 }
 
 /// The OS account running the agent: logins as this user skip the prompt (U-2).
