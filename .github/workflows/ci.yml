@@ -42,7 +42,14 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev xvfb && sudo bash ci/install-spa-headers.sh
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-features --locked
+      - name: Test
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cargo test --workspace --all-features --locked
+          else
+            # The agent and its capture backends are Linux-only (ADR-0004); PipeWire doesn't build on macOS.
+            cargo test --workspace --locked --exclude farsight-agent --exclude farsight-capture-wayland --exclude farsight-capture-x11
+          fi
       - name: Tray icon on a private D-Bus (with and without a host)
         if: runner.os == 'Linux'
         run: dbus-run-session -- env FARSIGHT_TRAY_TEST=1 cargo test -p farsight-desktop --test tray_host --locked
@@ -92,9 +99,12 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   fuzz-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      # AddressSanitizer crashes on runner kernels with high mmap randomisation.
+      - name: Make ASan-compatible address randomisation
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
       - uses: dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@v2
         with:

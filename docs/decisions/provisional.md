@@ -51,3 +51,7 @@ promote it to an ADR.
 | U-5 | The agent listens on **loopback by default**; `--listen lan` opts in to network access, which is encrypted-only (ADR-0009 unchanged) |
 | U-6 | systemd **user** unit shipped but **not enabled** on install |
 | U-7 | A second computer opens in a **new tab** by default; it can be moved to its own window |
+| U-8 | (2026-10-24) **Merge each finished milestone to `main`** (fast-forward, which publishes a release with `.deb` files) once it passes the local checks; milestone branches are still pushed too |
+| U-9 | **Headless shared input (M7):** one controller at a time. The first viewer controls; others watch until the controller hands over or the owner takes over (the owner always can) |
+| U-10 | **Headless session (M7):** runs `~/.config/farsight/headless-startup` (like TigerVNC's xstartup); the default opens a terminal and the file manager; X11 apps through Xwayland |
+| U-11 | **Compat names (M9):** an optional `farsight-tigervnc-compat` `.deb` that provides `vncviewer`, `vncserver`, `x0vncserver`, `vncpasswd` and conflicts with the TigerVNC packages |

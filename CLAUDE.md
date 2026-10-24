@@ -122,8 +122,11 @@ No local toolchain? `docker run --rm -v "$PWD":/w -w /w rust:latest cargo test -
 - **Every push to `main` produces a release**, so `main` must always be releasable. Commit on a
   milestone branch (`m<N>/<slug>`). Merge to `main` only through PRs that pass `ci.yml`.
 - **Push each finished milestone branch to GitHub** (`git push -u origin m<N>/<slug>`) right after its
-  milestone commit (user instruction). Never push WIP commits. Never push to `main` without the
-  user's go-ahead, because that publishes a release.
+  milestone commit (user instruction). Never push WIP commits.
+- **Merge each finished milestone to `main`** (user decision U-8): once the milestone passes fmt, clippy,
+  tests, deny and the layer check locally, fast-forward `main` to it and push. That publishes a release with
+  `.deb` files. Watch the release run and fix CI failures straight away. Anything that isn't a finished,
+  checked milestone still needs the user's go-ahead before it goes to `main`.
 - The workspace version in `Cargo.toml` stays `0.0.0`. The release workflow stamps the real
   version from the tag. Do not hand-edit it.
 
