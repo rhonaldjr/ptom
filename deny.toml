@@ -24,6 +24,12 @@ confidence-threshold = 0.9
 crate = "jpeg-encoder"
 allow = ["IJG"]
 
+# Pure-Rust bzip2, used only to unpack Cisco's OpenH264 download (M10). The
+# bzip2 1.0.6 licence is BSD-style (keep the notice, no endorsement).
+[[licenses.exceptions]]
+crate = "libbz2-rs-sys"
+allow = ["bzip2-1.0.6"]
+
 # Crates from libcosmic's git repositories that omit the `license` field.
 # Verified against the LICENSE files in each repository (2026-10-23).
 [[licenses.clarify]]

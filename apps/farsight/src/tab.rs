@@ -65,6 +65,7 @@ pub struct ConnectRequest {
     pub quality: Option<u8>,
     pub compress: Option<u8>,
     pub no_jpeg: bool,
+    pub video: Option<farsight_codec::video::SharedCodecs>,
     pub allow_insecure: bool,
     pub pinned: Option<Fingerprint>,
 }
@@ -865,6 +866,7 @@ pub fn connection(
             quality: request.quality,
             compress: request.compress,
             no_jpeg: request.no_jpeg,
+            video: request.video.clone(),
             allow_insecure: request.allow_insecure,
             ..SessionConfig::default()
         };

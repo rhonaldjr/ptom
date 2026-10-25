@@ -48,6 +48,12 @@ pub struct AgentOptions {
     pub startup: Option<std::path::PathBuf>,
     /// X display to share (`x0vncserver -display`); `$DISPLAY` otherwise.
     pub x11_display: Option<String>,
+    /// Offer Open H.264 to viewers that support it (`--h264`, M10).
+    pub h264: bool,
+    /// Download Cisco's OpenH264, then exit (`--install-openh264`).
+    pub install_openh264: bool,
+    /// Report which H.264 encoder would be used and how fast, then exit.
+    pub check_h264: bool,
 }
 
 impl Default for AgentOptions {
@@ -66,6 +72,9 @@ impl Default for AgentOptions {
             display: None,
             startup: None,
             x11_display: None,
+            h264: false,
+            install_openh264: false,
+            check_h264: false,
         }
     }
 }
@@ -112,6 +121,11 @@ Shares this desktop with Farsight and other VNC viewers.
   --trust-this-network         Announce this computer on the current network (e.g. at home), then exit.
                                With --listen lan, the agent announces itself only on trusted networks
   --untrust-this-network       Stop announcing on the current network, then exit
+  --h264                       Send video as H.264 to viewers that support it: on the GPU
+                               when it can (AMD/Intel), otherwise with OpenH264 (run
+                               --install-openh264 first). Needs a build with H.264
+  --install-openh264           Download Cisco's OpenH264 library, then exit
+  --check-h264                 Show which H.264 encoder --h264 would use and test it, then exit
   --show-identity              Print the fingerprints viewers will see, then exit
   --forget-portal-approval     Forget the remembered Wayland screen-sharing approval, then exit
   -h, --help, --version
@@ -176,6 +190,9 @@ impl Command {
                 "view-only" | "viewonly" => o.view_only = true,
                 "allow-legacy" => o.allow_legacy = true,
                 "no-advertise" => o.advertise = false,
+                "h264" => o.h264 = true,
+                "install-openh264" => o.install_openh264 = true,
+                "check-h264" => o.check_h264 = true,
                 "show-identity" => o.show_identity = true,
                 "forget-portal-approval" => o.forget_portal_approval = true,
                 "trust-this-network" => o.change_trust = Some(true),

@@ -16,6 +16,8 @@ farsight-capture-wayland = { workspace = true, optional = true }
 farsight-codec.workspace = true
 farsight-desktop.workspace = true
 farsight-headless.workspace = true
+farsight-h264 = { workspace = true, optional = true }
+farsight-hwenc = { workspace = true, optional = true }
 listenfd.workspace = true
 farsight-discovery.workspace = true
 farsight-net.workspace = true
@@ -35,6 +37,17 @@ tracing-subscriber.workspace = true
 [features]
 # Live Wayland sessions via xdg-desktop-portal + PipeWire (needs libpipewire-0.3-dev, P-24).
 wayland = ["dep:farsight-capture-wayland"]
+# Take the screen as a linear DMA-BUF when the compositor offers one (M10);
+# off in releases until tested by hand (U-14).
+dmabuf = ["wayland", "farsight-capture-wayland/dmabuf"]
+# Open H.264 with Cisco's downloadable OpenH264 (M10, U-12). Off in release
+# builds until it has been tested by hand (U-14).
+h264 = ["dep:farsight-h264"]
+# H.264 on AMD and Intel GPUs through VA-API (M10, U-15); libva is loaded at
+# run time. Also off in releases until tested by hand (U-14).
+vaapi = ["dep:farsight-hwenc", "farsight-hwenc/vaapi"]
+# H.264 on NVIDIA GPUs through NVENC (M10, U-15); off in releases until tested.
+nvenc = ["dep:farsight-hwenc", "farsight-hwenc/nvenc"]
 
 [dev-dependencies]
 tempfile.workspace = true

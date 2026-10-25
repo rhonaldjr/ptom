@@ -17,6 +17,8 @@ pub enum Encoding {
     Zrle,
     /// Standalone JPEG rectangles.
     Jpeg,
+    /// Open H.264 (rfbproto encoding 50): H.264 frames per rectangle context.
+    OpenH264,
     /// H.264 (TigerVNC's identifier).
     H264,
     /// Pseudo: the framebuffer was resized.
@@ -68,6 +70,7 @@ impl Encoding {
             7 => Self::Tight,
             16 => Self::Zrle,
             21 => Self::Jpeg,
+            50 => Self::OpenH264,
             H264 => Self::H264,
             -223 => Self::DesktopSize,
             -224 => Self::LastRect,
@@ -98,6 +101,7 @@ impl Encoding {
             Self::Tight => 7,
             Self::Zrle => 16,
             Self::Jpeg => 21,
+            Self::OpenH264 => 50,
             Self::H264 => H264,
             Self::DesktopSize => -223,
             Self::LastRect => -224,

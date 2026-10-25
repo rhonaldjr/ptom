@@ -910,6 +910,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "bzip2"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3a53fac24f34a81bc9954b5d6cfce0c21e18ec6959f44f56e8e90e4bb7c346c"
+dependencies = [
+ "libbz2-rs-sys",
+]
+
+[[package]]
 name = "calloop"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2020,8 +2029,10 @@ name = "farsight"
 version = "0.0.0"
 dependencies = [
  "farsight-client",
+ "farsight-codec",
  "farsight-desktop",
  "farsight-discovery",
+ "farsight-h264",
  "farsight-net",
  "farsight-rfb",
  "farsight-vault",
@@ -2044,7 +2055,9 @@ dependencies = [
  "farsight-codec",
  "farsight-desktop",
  "farsight-discovery",
+ "farsight-h264",
  "farsight-headless",
+ "farsight-hwenc",
  "farsight-net",
  "farsight-rfb",
  "farsight-security",
@@ -2068,6 +2081,7 @@ version = "0.0.0"
 dependencies = [
  "ashpd 0.13.13",
  "farsight-codec",
+ "farsight-gpu-sys",
  "farsight-rfb",
  "futures-util",
  "pipewire",
@@ -2111,6 +2125,7 @@ dependencies = [
  "flate2",
  "jpeg-encoder",
  "proptest",
+ "thiserror 2.0.21",
  "zune-core 0.5.3",
  "zune-jpeg 0.5.15",
 ]
@@ -2141,6 +2156,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "farsight-gpu-sys"
+version = "0.0.0"
+dependencies = [
+ "libloading",
+ "rustix 1.1.5",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "farsight-h264"
+version = "0.0.0"
+dependencies = [
+ "aws-lc-rs",
+ "bzip2",
+ "farsight-client",
+ "farsight-codec",
+ "farsight-rfb",
+ "farsight-server",
+ "openh264",
+ "rustls",
+ "rustls-native-certs",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
 name = "farsight-headless"
 version = "0.0.0"
 dependencies = [
@@ -2157,11 +2199,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "farsight-hwenc"
+version = "0.0.0"
+dependencies = [
+ "farsight-codec",
+ "farsight-gpu-sys",
+ "farsight-h264",
+ "proptest",
+ "tracing",
+]
+
+[[package]]
 name = "farsight-net"
 version = "0.0.0"
 dependencies = [
  "bytes",
  "farsight-client",
+ "farsight-codec",
+ "farsight-h264",
  "farsight-rfb",
  "farsight-security",
  "rustls",
@@ -3659,6 +3714,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
+name = "libbz2-rs-sys"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34b357333733e8260735ba5894eb928c02ecc69c78715f01a8019e7fa7f2db4c"
+
+[[package]]
 name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4520,6 +4581,26 @@ name = "oorandom"
 version = "11.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
+
+[[package]]
+name = "openh264"
+version = "0.9.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e54411f498088327bf5c45d2de7e5b0ed25875ee3be5800485afe45da7206bff"
+dependencies = [
+ "openh264-sys2",
+ "wide",
+]
+
+[[package]]
+name = "openh264-sys2"
+version = "0.9.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "414f5bd53da84e126dc9449eb6f0003bb6994b2de63c48119b0c9b7a8b28086a"
+dependencies = [
+ "libloading",
+ "sha2 0.10.9",
+]
 
 [[package]]
 name = "openssl-probe"
@@ -5576,6 +5657,15 @@ dependencies = [
  "unicode-ccc",
  "unicode-properties",
  "unicode-script",
+]
+
+[[package]]
+name = "safe_arch"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42c6efa15875e6ecb39ca61fb0b0c1a40b84fac5a5ffe71eef7d1000c8eb3f5f"
+dependencies = [
+ "bytemuck",
 ]
 
 [[package]]
@@ -7236,6 +7326,16 @@ dependencies = [
  "js-sys",
  "log",
  "web-sys",
+]
+
+[[package]]
+name = "wide"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d920ac99c3c8edce110cb8d07dbb324d6d026011dce85b1e9355b70f0adacc4f"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
 ]
 
 [[package]]

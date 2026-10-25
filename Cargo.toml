@@ -8,6 +8,7 @@ default-members = [
   "apps/farsight",
   "apps/farsight-agent",
   "apps/farsight-passwd",
+  "apps/farsight-sharing",
   "crates/farsight-capture-x11",
   "crates/farsight-client",
   "crates/farsight-codec",
@@ -45,6 +46,9 @@ farsight-desktop = { path = "crates/farsight-desktop" }
 farsight-capture-x11 = { path = "crates/farsight-capture-x11" }
 farsight-capture-wayland = { path = "crates/farsight-capture-wayland" }
 farsight-headless = { path = "crates/farsight-headless" }
+farsight-h264 = { path = "crates/farsight-h264" }
+farsight-gpu-sys = { path = "crates/farsight-gpu-sys" }
+farsight-hwenc = { path = "crates/farsight-hwenc" }
 
 # External
 anyhow = "1"
@@ -66,6 +70,12 @@ smithay = { version = "0.7", default-features = false, features = ["desktop", "r
 # Tight JPEG encoding (pure Rust; IJG-derived, see README credits).
 jpeg-encoder = { version = "0.7", default-features = false, features = ["std"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+# Open H.264 with Cisco's prebuilt library, loaded at run time after a SHA-256 check (M10, U-12).
+# No `source` feature: Farsight never builds or ships the codec itself.
+openh264 = { version = "0.9", default-features = false, features = ["libloading"] }
+bzip2 = "0.6"
+# Loads libva and NVIDIA's encoder at run time, so the agent starts without them (M10).
+libloading = "0.8"
 # systemd socket activation for headless desktops (M7).
 listenfd = "1"
 # Pure-Rust X11 protocol (no Xlib, no libxcb); used by farsight-capture-x11.

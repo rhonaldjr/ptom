@@ -132,3 +132,10 @@ path = "fuzz_targets/codec_encode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "codec_video"
+path = "fuzz_targets/codec_video.rs"
+test = false
+doc = false
+bench = false

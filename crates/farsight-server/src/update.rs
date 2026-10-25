@@ -78,6 +78,9 @@ pub(crate) struct UpdateState {
     continuous_ended: bool,
     name_serial: u64,
     name_dirty: bool,
+    /// H.264 (Open H.264): the codec and the viewer's current stream.
+    video: Option<std::sync::Arc<dyn farsight_codec::video::VideoCodecs>>,
+    video_stream: Option<VideoStream>,
     /// Confirm QEMU extended key events (a pseudo-rectangle, once).
     confirm_qemu_keys: bool,
     led_serial: u64,
@@ -104,7 +107,12 @@ pub(crate) struct UpdateState {
 
 impl UpdateState {
     /// State for a viewer that was just sent `ServerInit` for `desktop`.
-    pub(crate) fn new(allowed: Vec<Encoding>, max_rects: usize, desktop: &Desktop) -> Self {
+    pub(crate) fn new(
+        allowed: Vec<Encoding>,
+        max_rects: usize,
+        desktop: &Desktop,
+        video: Option<std::sync::Arc<dyn farsight_codec::video::VideoCodecs>>,
+    ) -> Self {
         let fb = desktop.framebuffer();
         Self {
             allowed,
@@ -119,6 +127,8 @@ impl UpdateState {
             continuous_ended: false,
             name_serial: desktop.name_serial(),
             name_dirty: false,
+            video,
+            video_stream: None,
             confirm_qemu_keys: false,
             led_serial: desktop.led_serial(),
             leds_dirty: false,
@@ -441,6 +451,11 @@ impl UpdateState {
                 self.damage.subtract(area);
             }
         }
+        if let Some(rect) = self.video_rect(desktop, &areas, bounds) {
+            rects.push(rect);
+            self.send_update(connection, &rects, continuous)?;
+            return Ok(());
+        }
         let mut pieces = Vec::new();
         for area in areas.take() {
             for piece in damage::split(area, PIECE, PIECE) {
@@ -461,11 +476,22 @@ impl UpdateState {
                 payload,
             ));
         }
+        self.send_update(connection, &rects, continuous)
+    }
+
+    /// Sends the update's rectangles (and, in continuous mode, the fence
+    /// that acknowledges it).
+    fn send_update(
+        &mut self,
+        connection: &mut ServerConnection,
+        rects: &[(RectHeader, Vec<u8>)],
+        continuous: bool,
+    ) -> Result<(), ProtocolError> {
         // At most a few pseudo-rectangles plus MAX_PIECES: fits in u16.
         let count = u16::try_from(rects.len())
             .map_err(|_| ProtocolError::InvalidState("too many rectangles in one update"))?;
         connection.send(&ServerMessage::FramebufferUpdate { rects: count })?;
-        for (header, payload) in &rects {
+        for (header, payload) in rects {
             connection.send_rect(header, payload)?;
         }
         if continuous {
@@ -481,6 +507,75 @@ impl UpdateState {
             self.in_flight = self.in_flight.saturating_add(1);
         }
         Ok(())
+    }
+
+    /// In H.264 mode, the whole desktop as one Open H.264 rectangle (one
+    /// context). `None` falls back to the lossless encoders: no codec, the
+    /// viewer doesn't take it, an odd size, or nothing changed.
+    fn video_rect(
+        &mut self,
+        desktop: &Desktop,
+        areas: &Region,
+        bounds: Rect,
+    ) -> Option<(RectHeader, Vec<u8>)> {
+        use farsight_codec::video::{RESET_ALL_CONTEXTS, open_h264_payload};
+        let codecs = self.video.clone()?;
+        let even = bounds.width.is_multiple_of(2) && bounds.height.is_multiple_of(2);
+        if !self.usable.contains(&Encoding::OpenH264) || !even || areas.is_empty() {
+            return None;
+        }
+        if self
+            .video_stream
+            .as_ref()
+            .is_none_or(|s| s.size != (bounds.width, bounds.height))
+        {
+            match codecs.encoder(bounds.width, bounds.height) {
+                Ok(encoder) => {
+                    self.video_stream = Some(VideoStream {
+                        encoder,
+                        size: (bounds.width, bounds.height),
+                        // A new stream starts with an I-frame on a fresh context.
+                        reset_pending: true,
+                    });
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "H.264 unavailable for this viewer; using lossless encodings");
+                    self.video = None;
+                    return None;
+                }
+            }
+        }
+        let pixels = match desktop.framebuffer().read(bounds) {
+            Ok(pixels) => pixels,
+            Err(error) => {
+                tracing::warn!(%error, "could not read the desktop for H.264; sending lossless");
+                return None;
+            }
+        };
+        let stream = self.video_stream.as_mut()?;
+        match stream.encoder.encode(&pixels) {
+            Ok(data) => {
+                let flags = if stream.reset_pending {
+                    RESET_ALL_CONTEXTS
+                } else {
+                    0
+                };
+                stream.reset_pending = false;
+                Some((
+                    RectHeader {
+                        rect: bounds,
+                        encoding: Encoding::OpenH264,
+                    },
+                    open_h264_payload(flags, &data),
+                ))
+            }
+            Err(error) => {
+                tracing::warn!(%error, "H.264 encoding failed; using lossless encodings");
+                self.video = None;
+                self.video_stream = None;
+                None
+            }
+        }
     }
 
     /// Size, layout and cursor pseudo-rectangles due in this update, and
@@ -663,6 +758,14 @@ impl UpdateState {
             _ => Ok((Encoding::Raw, encode::raw(fb, rect, &self.converter)?)),
         }
     }
+}
+
+/// One viewer's H.264 stream.
+struct VideoStream {
+    encoder: Box<dyn farsight_codec::video::VideoEncoder>,
+    size: (u16, u16),
+    /// The viewer hasn't yet been told to start a fresh context.
+    reset_pending: bool,
 }
 
 /// The sequence number in a fence payload the agent made (tag + seq).

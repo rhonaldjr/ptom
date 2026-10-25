@@ -1,0 +1,27 @@
+[package]
+name = "farsight-hwenc"
+description = "Hardware H.264 encoding for the agent: VA-API (AMD, Intel) and NVENC (NVIDIA), with a software fallback"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# AMD and Intel through VA-API (libva is loaded at run time).
+vaapi = ["dep:farsight-gpu-sys", "farsight-gpu-sys/va"]
+# NVIDIA through NVENC (the driver's libraries are loaded at run time).
+nvenc = ["dep:farsight-gpu-sys", "farsight-gpu-sys/nvenc"]
+
+[dependencies]
+farsight-codec.workspace = true
+farsight-gpu-sys = { workspace = true, optional = true }
+tracing.workspace = true
+
+[dev-dependencies]
+farsight-h264.workspace = true
+proptest.workspace = true
+
+[lints]
+workspace = true

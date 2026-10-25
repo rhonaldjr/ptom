@@ -16,9 +16,15 @@ tokio.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+farsight-gpu-sys = { workspace = true, optional = true }
 ashpd.workspace = true
 pipewire.workspace = true
 futures-util.workspace = true
+
+[features]
+# Accept the screen as a DMA-BUF (GPU buffer) when the compositor offers one
+# (M10, ADR-0021). Off by default and in releases until tested by hand (U-14).
+dmabuf = ["dep:farsight-gpu-sys"]
 
 [dev-dependencies]
 proptest.workspace = true

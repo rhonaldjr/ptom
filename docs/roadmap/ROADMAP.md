@@ -20,7 +20,7 @@ dependencies. Milestones are scope, not dates.
 | M7 Persistent headless desktops | ✅ Done |
 | M8 Performance and full encodings | ✅ Done |
 | M9 Compatibility and polish | ✅ Done (hand checks pending) |
-| M10 GPU paths and H.264 | ⬜ Not started |
+| M10 GPU paths and H.264 | ✅ Done (off in releases until hand-tested) |
 
 Each item below is a checkbox: ticked means built, tested and committed.
 
@@ -140,10 +140,18 @@ PLT-3, INP-3, INP-4, VWR-7, VWR-11, UTL-2, UTL-3, UTL-4
   listed first and labelled in the viewer; app-menu entries; the Farsight and Farsight Sharing logos (app menu, dock, tray, macOS `Farsight.app`);
   clearer "Connection refused" message ([review](../reviews/2026-10-24-m9.1-sharing-review.md))
 
-## M10: GPU paths and H.264 ⬜ Not started · [council](../council/2026-10-23-initial-roadmap.md#m10-gpu--h264)
+## M10: GPU paths and H.264 ✅ Done (off in releases until hand-tested) · [council](../council/2026-10-23-initial-roadmap.md#m10-gpu--h264) · [ADR-0021](../adr/0021-unsafe-confined-to-gpu-sys.md) · [review](../reviews/2026-10-25-m10-review.md)
 SRV-11, ENC-8
-- [ ] DMA-BUF capture, VA-API/Vulkan encode, and H.264 behind an **optional** cargo feature
-- [ ] **Conditions:** licensing review before enabling in release builds
+- [x] Open H.264 (encoding 50) in the viewer (`-H264`) and agent (`--h264`), with Cisco's OpenH264 downloaded
+  on request (`--install-openh264`, U-12)
+- [x] Hardware H.264: VA-API on AMD/Intel (tested on an AMD RX 9070-class GPU, 1080p at over 120 fps) and NVENC on
+  NVIDIA (U-15, P-51, P-52); `farsight-agent --check-h264` reports which encoder is used and how fast
+- [x] DMA-BUF capture on Wayland (linear buffers, shared memory as the fallback; P-53)
+- [x] `unsafe` confined to one small crate, `farsight-gpu-sys`, with libraries loaded at run time (U-13, ADR-0021)
+- [x] Licensing review ([h264-licensing.md](../security/h264-licensing.md)): no blocker for opt-in H.264
+- [ ] Vulkan Video encode: deferred (P-54)
+- ⚠️ Still to do by hand before the features go into release builds (U-14): NVENC on the NVIDIA machine, DMA-BUF
+  on a Wayland desktop, and a real session with each ([charter](../testing/charters/2026-10-25-gpu-h264.md))
 
 ---
 

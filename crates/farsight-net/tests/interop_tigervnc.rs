@@ -2,7 +2,9 @@
 //! `FARSIGHT_INTEROP_ADDR` (e.g. `127.0.0.1::5901`) and optionally
 //! `FARSIGHT_INTEROP_PASSWORD`; set `FARSIGHT_INTEROP_EXPECT_ENCRYPTED=1`
 //! when the server only offers encrypted security types. CI starts
-//! `tests/interop/tigervnc` in several configurations.
+//! `tests/interop/tigervnc` in several configurations. With
+//! `FARSIGHT_INTEROP_OPENH264_DIR` (a folder `farsight_h264::install` filled)
+//! the viewer also accepts Open H.264 (M10).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -20,10 +22,15 @@ async fn connects_authenticates_and_decodes_a_red_desktop() {
     };
     let password = std::env::var("FARSIGHT_INTEROP_PASSWORD").unwrap_or_else(|_| "farsight".into());
     let address = ServerAddress::parse(&address).unwrap();
+    let video = std::env::var_os("FARSIGHT_INTEROP_OPENH264_DIR").map(|dir| {
+        let codecs = farsight_h264::OpenH264::load(std::path::Path::new(&dir)).unwrap();
+        farsight_codec::video::SharedCodecs(std::sync::Arc::new(codecs))
+    });
     let (handle, mut updates) = connect(
         &address,
         SessionConfig {
             shared: true,
+            video: video.clone(),
             ..SessionConfig::default()
         },
     )
@@ -78,7 +85,12 @@ async fn connects_authenticates_and_decodes_a_red_desktop() {
                     frame.height,
                     frame.rgba.get(centre..centre + 4)
                 );
-                if frame.rgba.get(centre..centre + 3) == Some(&[0xff, 0, 0]) {
+                // H.264 is lossy: red comes back as nearly red.
+                let red = match frame.rgba.get(centre..centre + 3) {
+                    Some(&[r, g, b]) if video.is_some() => r >= 0xf0 && g <= 0x10 && b <= 0x10,
+                    pixel => pixel == Some(&[0xff, 0, 0]),
+                };
+                if red {
                     assert!(handle.send(Command::Disconnect));
                     return;
                 }

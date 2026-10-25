@@ -20,6 +20,8 @@ pub enum Command {
     Help,
     /// Print the version.
     Version,
+    /// Download Cisco's OpenH264 library (`--install-openh264`), then exit.
+    InstallOpenH264,
 }
 
 /// Viewer settings from the command line.
@@ -40,6 +42,8 @@ pub struct ViewerOptions {
     pub compress: Option<u8>,
     /// Never use lossy JPEG.
     pub no_jpeg: bool,
+    /// Accept Open H.264 video (`-H264`, Farsight extension, M10).
+    pub h264: bool,
     /// Allow unencrypted, legacy security without asking (Farsight extension).
     pub allow_insecure: bool,
     /// Legacy `vncpasswd` file to read the password from (read-only, ADR-0014).
@@ -60,6 +64,7 @@ impl Default for ViewerOptions {
             quality: None,
             compress: None,
             no_jpeg: false,
+            h264: false,
             allow_insecure: false,
             password_file: None,
             menu_key: "F8".into(),
@@ -104,6 +109,8 @@ Options (TigerVNC-compatible; case-insensitive; -Name value or -Name=value):
   -QualityLevel N       JPEG quality 0-9
   -CompressLevel N      Compression level 0-9
   -NoJPEG               Never use lossy JPEG (exact pixels, more bandwidth)
+  -H264                 Accept H.264 video (needs --install-openh264 once)
+  --install-openh264    Download Cisco's OpenH264 library, then exit
   -PasswordFile FILE    Read the password from a vncpasswd file (alias -passwd)
   -MenuKey KEY          Key that opens the viewer menu (default F8)
   -RemoteResize=0       Don't resize the remote desktop to fit the window
@@ -147,6 +154,8 @@ impl Command {
             match name.as_str() {
                 "help" | "h" | "?" => return Ok(Self::Help),
                 "version" => return Ok(Self::Version),
+                "install-openh264" => return Ok(Self::InstallOpenH264),
+                "h264" => options.h264 = boolean(&name, inline.as_deref())?,
                 "viewonly" => options.view_only = boolean(&name, inline.as_deref())?,
                 "fullscreen" => options.full_screen = boolean(&name, inline.as_deref())?,
                 "shared" => options.shared = boolean(&name, inline.as_deref())?,

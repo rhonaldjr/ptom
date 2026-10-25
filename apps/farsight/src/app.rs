@@ -106,6 +106,8 @@ static TRAY_ACTIONS: Mutex<Option<UnboundedReceiver<TrayAction>>> = Mutex::new(N
 pub struct App {
     core: Core,
     options: ViewerOptions,
+    /// Open H.264 codecs for every tab (`-H264`), when available.
+    video: Option<farsight_codec::video::SharedCodecs>,
     home: Home,
     address_input: String,
     passphrase_input: String,
@@ -140,6 +142,7 @@ impl cosmic::Application for App {
         let mut app = Self {
             core,
             address_input: String::new(),
+            video: crate::video::codecs(options.h264),
             options,
             home: Home::Connect,
             passphrase_input: String::new(),
@@ -439,6 +442,7 @@ impl App {
             quality: self.options.quality,
             compress: self.options.compress,
             no_jpeg: self.options.no_jpeg,
+            video: self.video.clone(),
             allow_insecure,
             pinned: known.pinned,
         };

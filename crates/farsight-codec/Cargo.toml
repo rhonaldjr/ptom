@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+thiserror.workspace = true
 jpeg-encoder.workspace = true
 farsight-rfb.workspace = true
 flate2.workspace = true

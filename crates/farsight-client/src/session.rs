@@ -62,6 +62,9 @@ pub struct SessionConfig {
     pub compress: Option<u8>,
     /// Never ask for JPEG (TigerVNC `-NoJPEG`): every pixel arrives exactly.
     pub no_jpeg: bool,
+    /// An H.264 codec (M10, opt-in): servers that support Open H.264 may
+    /// then send the desktop as video.
+    pub video: Option<farsight_codec::video::SharedCodecs>,
 }
 
 /// Where the session is in its lifecycle.
@@ -677,6 +680,9 @@ impl Session {
     fn on_connected(&mut self, width: u16, height: u16) -> Result<(), ProtocolError> {
         self.status = SessionStatus::Connected;
         self.decoder = Decoder::new(width, height, PixelFormat::RGB888, Limits::DEFAULT);
+        if let Some(video) = &self.config.video {
+            self.decoder.set_video(std::sync::Arc::clone(&video.0));
+        }
         self.connection
             .send(&ClientMessage::SetPixelFormat(PixelFormat::RGB888))?;
         self.connection
@@ -727,7 +733,11 @@ impl Session {
     }
 
     fn encodings(&self) -> Vec<Encoding> {
-        let mut list = vec![
+        let mut list = Vec::new();
+        if self.config.video.is_some() {
+            list.push(Encoding::OpenH264);
+        }
+        list.extend([
             Encoding::Tight,
             Encoding::Zrle,
             Encoding::Hextile,
@@ -744,7 +754,7 @@ impl Session {
             Encoding::Fence,
             Encoding::QemuExtendedKeyEvent,
             Encoding::LedState,
-        ];
+        ]);
         if !self.config.no_jpeg {
             list.push(Encoding::JpegQuality(self.config.quality.unwrap_or(8)));
         }

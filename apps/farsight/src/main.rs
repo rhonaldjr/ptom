@@ -7,6 +7,7 @@ mod keymap;
 mod nearby;
 mod store;
 mod tab;
+mod video;
 mod views;
 
 use std::process::ExitCode;
@@ -33,6 +34,18 @@ fn main() -> ExitCode {
             Ok(Command::Version) => {
                 println!("farsight {}", env!("CARGO_PKG_VERSION"));
                 return ExitCode::SUCCESS;
+            }
+            Ok(Command::InstallOpenH264) => {
+                return match video::install() {
+                    Ok(message) => {
+                        println!("{message}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(error) => {
+                        eprintln!("farsight: {error}");
+                        ExitCode::FAILURE
+                    }
+                };
             }
             Err(error) => {
                 eprintln!("farsight: {error}");

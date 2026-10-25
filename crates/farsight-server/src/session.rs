@@ -81,6 +81,9 @@ pub struct ServerSessionConfig {
     pub send_clipboard: bool,
     /// Pixel encodings the agent may use, most preferred first.
     pub encodings: Vec<Encoding>,
+    /// An H.264 codec (M10, opt-in): with it, viewers that support Open
+    /// H.264 get the desktop as video.
+    pub video: Option<std::sync::Arc<dyn farsight_codec::video::VideoCodecs>>,
     /// Newest RFB version to offer.
     pub max_version: ProtocolVersion,
     /// Bounds on viewer-announced lengths.
@@ -129,6 +132,7 @@ impl ServerSessionConfig {
             },
             max_damage_rects: DEFAULT_MAX_RECTS,
             max_clipboard_out: DEFAULT_MAX_CLIPBOARD as usize,
+            video: None,
         }
     }
 
@@ -474,10 +478,15 @@ impl ServerSession {
             name: desktop.name().to_owned(),
         })?;
         self.stage = Stage::Connected;
+        let mut encodings = self.config.encodings.clone();
+        if self.config.video.is_some() && !encodings.contains(&Encoding::OpenH264) {
+            encodings.insert(0, Encoding::OpenH264);
+        }
         self.update = Some(UpdateState::new(
-            self.config.encodings.clone(),
+            encodings,
             self.config.max_damage_rects,
             desktop,
+            self.config.video.clone(),
         ));
         self.clipboard_serial = desktop.clipboard_serial();
         let owner = self.is_owner();

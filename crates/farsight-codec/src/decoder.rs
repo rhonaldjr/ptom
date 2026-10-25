@@ -29,6 +29,8 @@ pub struct Decoder {
     name: Option<String>,
     /// Keyboard LEDs the server last reported, until taken.
     leds: Option<u8>,
+    /// Open H.264 decoders, when a codec was supplied.
+    video: Option<crate::video::VideoContexts>,
 }
 
 impl Decoder {
@@ -48,7 +50,20 @@ impl Decoder {
             last_resize: None,
             name: None,
             leds: None,
+            video: None,
         }
+    }
+
+    /// Enables Open H.264 decoding with `codecs` (the caller then
+    /// advertises the encoding).
+    pub fn set_video(&mut self, codecs: std::sync::Arc<dyn crate::video::VideoCodecs>) {
+        self.video = Some(crate::video::VideoContexts::new(codecs));
+    }
+
+    /// Whether Open H.264 can be decoded.
+    #[must_use]
+    pub fn has_video(&self) -> bool {
+        self.video.is_some()
     }
 
     /// The keyboard LEDs (bit 0 Scroll, 1 Num, 2 Caps Lock) the server last
@@ -216,6 +231,10 @@ impl RectDecoder for Decoder {
                 crate::rre::decode(&mut self.framebuffer, &self.converter, rect, input)
             }
             Encoding::DesktopName => self.desktop_name(input),
+            Encoding::OpenH264 => match &mut self.video {
+                Some(video) => video.decode(&mut self.framebuffer, rect, input),
+                None => Err(DecodeError::UnsupportedEncoding(Encoding::OpenH264.code())),
+            },
             // The server confirms QEMU key events; no payload.
             Encoding::QemuExtendedKeyEvent => Ok(Some(0)),
             Encoding::LedState => {

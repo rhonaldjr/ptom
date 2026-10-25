@@ -7,6 +7,7 @@ mod compat;
 mod identity;
 mod options;
 mod runtime;
+mod video;
 mod vncserver;
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -132,7 +133,14 @@ async fn run(
     }
     // Catch SIGHUP from the start: a `systemctl --user reload` while we are
     // still starting must not kill us (its default action).
-    let mut hangup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
+    let hangup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
+    if options.install_openh264 {
+        return video::install();
+    }
+    if options.check_h264 {
+        return video::check();
+    }
+    let video = video::codecs(options.h264)?;
     if let Some(trust) = options.change_trust {
         return advertise::change_trust(&Identity::default_dir()?, trust);
     }
@@ -189,6 +197,7 @@ async fn run(
         allow_legacy: options.allow_legacy,
         view_only: options.view_only,
         headless,
+        video,
     };
     let name = format!("{}@{host}", owner().unwrap_or_else(|| "desktop".into()));
     let agent = Agent::new(settings, name, capture.input.clone());
@@ -212,19 +221,7 @@ async fn run(
     let input = capture.input.clone();
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     // `systemctl --user reload` (SIGHUP): re-read passwords (M9).
-    tokio::spawn({
-        let agent = Arc::clone(&agent);
-        async move {
-            while hangup.recv().await.is_some() {
-                match load_logins_blocking(KeyringFailure::Abort).await {
-                    Ok(logins) => agent.reload_logins(logins),
-                    Err(error) => {
-                        warn!(error = %format!("{error:#}"), "could not reload passwords");
-                    }
-                }
-            }
-        }
-    });
+    spawn_reloader(Arc::clone(&agent), hangup);
     let pump = tokio::spawn(Arc::clone(&agent).pump(capture));
     let result = tokio::select! {
         result = Arc::clone(&agent).listen(listener) => result,
@@ -234,6 +231,18 @@ async fn run(
     };
     capture::shutdown(&input, compositor).await;
     result
+}
+
+/// Re-reads passwords on every SIGHUP (`systemctl --user reload`).
+fn spawn_reloader(agent: Arc<Agent>, mut hangup: tokio::signal::unix::Signal) {
+    tokio::spawn(async move {
+        while hangup.recv().await.is_some() {
+            match load_logins_blocking(KeyringFailure::Abort).await {
+                Ok(logins) => agent.reload_logins(logins),
+                Err(error) => warn!(error = %format!("{error:#}"), "could not reload passwords"),
+            }
+        }
+    });
 }
 
 /// [`load_logins`] off the async workers: the OS keyring client blocks (and

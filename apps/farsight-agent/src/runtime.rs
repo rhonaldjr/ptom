@@ -58,6 +58,8 @@ pub struct Settings {
     /// A headless desktop (M7): nobody sits at it, so there's no approval
     /// prompt, viewers can resize it, and one viewer at a time controls it (U-9).
     pub headless: bool,
+    /// Open H.264 codecs (`--h264`, M10).
+    pub video: Option<Arc<dyn farsight_codec::video::VideoCodecs>>,
 }
 
 /// How viewers may log in; reloadable at run time (SIGHUP, M9).
@@ -290,6 +292,7 @@ impl Agent {
         let mut config = ServerSessionConfig::new(peer.to_string(), Arc::new(OsEntropy));
         config.loopback = loopback;
         config.allow_legacy = self.settings.allow_legacy;
+        config.video.clone_from(&self.settings.video);
         config.tls_available = true;
         config.ra2_key = Some(Arc::clone(&self.settings.ra2));
         let logins = lock(&self.logins).clone();

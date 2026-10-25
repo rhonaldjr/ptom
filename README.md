@@ -47,7 +47,7 @@ Sharing and other VNC software.
 | ✅ M7 | Desktops that keep running in the background |
 | ✅ M8 | Faster, smaller updates: every VNC encoding, automatic JPEG for photos, smooth streaming |
 | ✅ M9 | Works like TigerVNC: same command names (optional), physical keys for any layout, lock-key indicators |
-| M10 | Hardware acceleration |
+| ✅ M10 | **Hardware video (preview):** H.264 encoded on your graphics card (AMD, Intel, NVIDIA). Not in the downloads yet: see below |
 
 The full plan is in [docs/roadmap/ROADMAP.md](docs/roadmap/ROADMAP.md).
 
@@ -173,6 +173,26 @@ farsight-passwd import              # bring over an existing ~/.vnc/passwd
   pixels everywhere, or `-QualityLevel 0-9` to trade quality for speed.
 - Farsight accepts TigerVNC's `vncviewer` options. Run `farsight --help` to see them.
 
+## Smoother video with H.264 (preview)
+
+Farsight can send the screen as H.264 video, encoded on your graphics card: AMD and Intel through VA-API, NVIDIA
+through NVENC. Where there's no suitable card, it uses Cisco's free OpenH264 library instead. That makes scrolling,
+video and fast-changing screens much smoother on slow networks. It's off by default, and the downloads don't
+include it yet. It goes into the downloads once it has been tested by hand on real AMD and NVIDIA machines
+([test plan](docs/testing/charters/2026-10-25-gpu-h264.md)).
+
+To try it, build it yourself (see below) with the H.264 features, then:
+
+```bash
+farsight-agent --install-openh264    # once: Cisco's library (needed to view, optional to share)
+farsight-agent --check-h264          # which graphics card will encode, and how fast
+farsight-agent --h264 --listen lan   # share with H.264
+farsight --install-openh264          # once, on the viewing computer
+farsight -H264 192.168.1.165         # view with H.264
+```
+
+Both sides fall back to the normal, lossless updates whenever H.264 isn't available.
+
 ## Build locally
 
 You need [Rust](https://rustup.rs) (the stable toolchain) and, for the viewer, a few system libraries:
@@ -191,6 +211,15 @@ git clone https://github.com/rhonaldjr/ptom.git
 cd ptom
 cargo build --release        # programs end up in target/release/
 cargo test --workspace       # run the tests
+```
+
+H.264 (preview) is behind optional features. Graphics drivers are loaded when the program runs, so building needs
+nothing extra:
+
+```bash
+cargo build --release -p farsight-agent -p farsight-passwd \
+  --features farsight-agent/h264,farsight-agent/vaapi,farsight-agent/nvenc
+cargo build --release -p farsight --features farsight/h264
 ```
 
 
@@ -214,6 +243,10 @@ cargo test --workspace       # run the tests
   docker run -d -p 127.0.0.1:15901:5901 farsight-interop-tigervnc
   FARSIGHT_INTEROP_ADDR=127.0.0.1::15901 cargo test -p farsight-net --test interop_tigervnc
   ```
+- GPU H.264 check on a computer with a graphics card (CI has none): `tests/e2e/agent-h264-gpu.sh` and
+  `cargo test -p farsight-hwenc --features vaapi`. All `unsafe` code lives in `crates/farsight-gpu-sys`
+  ([ADR-0021](docs/adr/0021-unsafe-confined-to-gpu-sys.md)); its native declarations are regenerated with
+  `scripts/gen-va-bindings.sh` and `scripts/gen-nvenc-bindings.sh`.
 - Fuzz tests (needs nightly Rust and `cargo install cargo-fuzz`): `cd fuzz && cargo +nightly fuzz run rfb_version`
 - Use [Conventional Commits](https://www.conventionalcommits.org) (`feat:`, `fix:`, `docs:` …). Every merge
   to `main` becomes a release, and the commit type decides the version number.
@@ -225,3 +258,6 @@ MIT. Farsight is written from scratch from the public VNC specification and cont
 
 This software is based in part on the work of the Independent JPEG Group (through the `jpeg-encoder` crate, used
 for Tight JPEG).
+
+OpenH264 Video Codec provided by Cisco Systems, Inc. Farsight doesn't include the codec. When you ask for H.264, it
+downloads Cisco's own build and checks it ([licensing review](docs/security/h264-licensing.md)).

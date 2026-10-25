@@ -150,12 +150,8 @@ impl Thread {
             tracing::warn!("cannot start the frame flush timer: {error}");
         }
 
-        let format = enum_format_pod();
-        let mut params: Vec<&Pod> = format
-            .as_deref()
-            .and_then(Pod::from_bytes)
-            .into_iter()
-            .collect();
+        let formats = enum_format_pods();
+        let mut params: Vec<&Pod> = formats.iter().filter_map(|f| Pod::from_bytes(f)).collect();
         stream.connect(
             spa::utils::Direction::Input,
             Some(self.node_id),
@@ -183,6 +179,30 @@ struct VideoFormatInfo {
     format: PixelFormat,
     width: u32,
     height: u32,
+    memory: Memory,
+}
+
+/// Which buffers the negotiated format allows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Memory {
+    /// Shared memory only (no modifier was negotiated).
+    Shared,
+    /// Also DMA-BUFs: the format fixed the modifier to LINEAR, so the CPU
+    /// can read them row by row.
+    #[cfg(feature = "dmabuf")]
+    LinearDmaBuf,
+}
+
+/// The memory a negotiated format allows: DMA-BUF only when it carries a
+/// modifier and that modifier is LINEAR (a tiled buffer read as rows would
+/// be scrambled).
+fn negotiated_memory(info: &VideoInfoRaw) -> Memory {
+    #[cfg(feature = "dmabuf")]
+    if info.flags().bits() & spa::sys::SPA_VIDEO_FLAG_MODIFIER != 0 && info.modifier() == 0 {
+        return Memory::LinearDmaBuf;
+    }
+    let _ = info;
+    Memory::Shared
 }
 
 /// A change to the pointer image.
@@ -276,15 +296,17 @@ impl Capture {
             size.width,
             size.height
         );
+        let memory = negotiated_memory(&info);
         self.format = Some(VideoFormatInfo {
             format,
             width: size.width,
             height: size.height,
+            memory,
         });
         self.frame_size.set(size.width, size.height);
         self.damage.reset();
 
-        let pods: Vec<Vec<u8>> = buffer_param_objects()
+        let pods: Vec<Vec<u8>> = buffer_param_objects(memory)
             .into_iter()
             .filter_map(serialize)
             .collect();
@@ -349,23 +371,13 @@ impl Capture {
         let Some(data) = buffer.datas_mut().first_mut() else {
             return;
         };
-        let data_type = data.type_();
-        if data_type != DataType::MemPtr && data_type != DataType::MemFd {
-            tracing::warn!("PipeWire sent a buffer we cannot map (not SHM)");
-            return;
-        }
         let chunk = data.chunk();
         let (offset, size, stride) = (chunk.offset(), chunk.size(), chunk.stride());
         if size == 0 || chunk.flags().contains(ChunkFlags::CORRUPTED) {
             // A cursor-only update, or a frame the compositor marked as unusable.
             return;
         }
-        let Some(bytes) = data.data() else { return };
         let (Ok(offset), Ok(size)) = (usize::try_from(offset), usize::try_from(size)) else {
-            return;
-        };
-        let Some(image) = bytes.get(offset..offset.saturating_add(size)) else {
-            tracing::warn!("PipeWire chunk lies outside its buffer");
             return;
         };
         let stride = match usize::try_from(stride) {
@@ -378,7 +390,23 @@ impl Capture {
             height: info.height,
             stride,
         };
-        match pixels::to_framebuffer(layout, image) {
+        let convert = |bytes: &[u8]| match bytes.get(offset..offset.saturating_add(size)) {
+            Some(image) => pixels::to_framebuffer(layout, image).map_err(|e| e.to_string()),
+            None => Err("PipeWire chunk lies outside its buffer".to_owned()),
+        };
+        let converted = match data.type_() {
+            DataType::MemPtr | DataType::MemFd => match data.data() {
+                Some(bytes) => convert(bytes),
+                None => return,
+            },
+            #[cfg(feature = "dmabuf")]
+            DataType::DmaBuf if info.memory == Memory::LinearDmaBuf => read_dmabuf(data, convert),
+            _ => {
+                tracing::warn!("PipeWire sent a buffer we cannot map");
+                return;
+            }
+        };
+        match converted {
             Ok(framebuffer) => {
                 self.damage.add(damage);
                 self.latest = Some(framebuffer);
@@ -396,6 +424,21 @@ impl Capture {
             Err(_) => self.cursor.pending = Some(cursor),
         }
     }
+}
+
+/// Reads a DMA-BUF frame through a read-only mapping (`farsight-gpu-sys`,
+/// ADR-0021). Its layout is linear: that's the only modifier we offer.
+#[cfg(feature = "dmabuf")]
+fn read_dmabuf(
+    data: &spa::buffer::Data,
+    convert: impl FnOnce(&[u8]) -> Result<Framebuffer, String>,
+) -> Result<Framebuffer, String> {
+    let raw = data.as_raw();
+    let (Ok(fd), Ok(len)) = (i32::try_from(raw.fd), usize::try_from(raw.maxsize)) else {
+        return Err("PipeWire sent an unusable DMA-BUF".to_owned());
+    };
+    farsight_gpu_sys::read_dmabuf(fd, u64::from(raw.mapoffset), len, convert)
+        .map_err(|e| format!("reading the DMA-BUF: {e}"))?
 }
 
 fn with(capture: &Rc<RefCell<Capture>>, f: impl FnOnce(&mut Capture)) {
@@ -485,9 +528,41 @@ fn int_range(default: usize, min: usize, max: usize) -> Value {
     )))
 }
 
-/// The formats we accept: 32-bit RGB in shared memory. No modifier is offered, so the
-/// compositor does not pick DMA-BUF.
-fn enum_format_pod() -> Option<Vec<u8>> {
+/// The formats we accept, preferred first: with the `dmabuf` feature, a
+/// linear DMA-BUF (the compositor then skips its copy to shared memory);
+/// always, 32-bit RGB in shared memory (no modifier, so no DMA-BUF).
+fn enum_format_pods() -> Vec<Vec<u8>> {
+    let mut formats = Vec::new();
+    #[cfg(feature = "dmabuf")]
+    formats.extend(serialize(linear_dmabuf_format()));
+    formats.extend(serialize(format_object()));
+    formats
+}
+
+/// The shared-memory format plus `modifier = LINEAR`, mandatory: buffers
+/// the CPU can read row by row.
+#[cfg(feature = "dmabuf")]
+fn linear_dmabuf_format() -> Object {
+    /// `DRM_FORMAT_MOD_LINEAR`.
+    const LINEAR: i64 = 0;
+    let mut object = format_object();
+    object.properties.push(Property {
+        key: FormatProperties::VideoModifier.as_raw(),
+        // One choice, so nothing for us to fixate (no DONT_FIXATE).
+        flags: PropertyFlags::MANDATORY,
+        value: Value::Choice(ChoiceValue::Long(Choice(
+            ChoiceFlags::empty(),
+            ChoiceEnum::Enum {
+                default: LINEAR,
+                alternatives: vec![LINEAR],
+            },
+        ))),
+    });
+    object
+}
+
+/// 32-bit RGB video of any size up to [`MAX_FRAME`].
+fn format_object() -> Object {
     let video_formats = [
         VideoFormat::BGRx,
         VideoFormat::RGBx,
@@ -496,7 +571,7 @@ fn enum_format_pod() -> Option<Vec<u8>> {
     ]
     .map(|f| Id(f.as_raw()));
     let rectangle = |width, height| Rectangle { width, height };
-    serialize(Object {
+    Object {
         type_: SpaTypes::ObjectParamFormat.as_raw(),
         id: ParamType::EnumFormat.as_raw(),
         properties: vec![
@@ -547,7 +622,7 @@ fn enum_format_pod() -> Option<Vec<u8>> {
                 ))),
             ),
         ],
-    })
+    }
 }
 
 /// Size of a cursor metadata block holding a `side` × `side` RGBA bitmap.
@@ -558,9 +633,15 @@ fn cursor_meta_size(side: u32) -> usize {
         + side * side * BYTES_PER_PIXEL
 }
 
-/// Shared-memory buffers, plus damage and cursor metadata.
-fn buffer_param_objects() -> Vec<Object> {
-    let shm_types = (1u32 << spa::sys::SPA_DATA_MemPtr) | (1u32 << spa::sys::SPA_DATA_MemFd);
+/// Buffers in shared memory (plus DMA-BUFs when `memory` allows them),
+/// with damage and cursor metadata.
+fn buffer_param_objects(memory: Memory) -> Vec<Object> {
+    let shared = (1u32 << spa::sys::SPA_DATA_MemPtr) | (1u32 << spa::sys::SPA_DATA_MemFd);
+    let shm_types = match memory {
+        Memory::Shared => shared,
+        #[cfg(feature = "dmabuf")]
+        Memory::LinearDmaBuf => shared | (1u32 << spa::sys::SPA_DATA_DmaBuf),
+    };
     let region = std::mem::size_of::<spa::sys::spa_meta_region>();
     let meta = |kind: u32, size: Value| Object {
         type_: SpaTypes::ObjectParamMeta.as_raw(),
@@ -606,9 +687,13 @@ mod tests {
 
     #[test]
     fn params_serialize_to_valid_pods() {
-        let format = enum_format_pod().unwrap();
-        assert!(Pod::from_bytes(&format).is_some());
-        for object in buffer_param_objects() {
+        let formats = enum_format_pods();
+        // One format, or (with `dmabuf`) the linear DMA-BUF one first.
+        assert_eq!(formats.len(), if cfg!(feature = "dmabuf") { 2 } else { 1 });
+        for format in &formats {
+            assert!(Pod::from_bytes(format).is_some());
+        }
+        for object in buffer_param_objects(Memory::Shared) {
             let bytes = serialize(object).unwrap();
             assert!(Pod::from_bytes(&bytes).is_some());
         }

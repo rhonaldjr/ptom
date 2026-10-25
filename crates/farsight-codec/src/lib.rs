@@ -26,6 +26,7 @@ mod pixel;
 mod rre;
 mod tight;
 mod util;
+pub mod video;
 mod zrle;
 
 pub use cursor::{Cursor, MAX_CURSOR_SIDE};
