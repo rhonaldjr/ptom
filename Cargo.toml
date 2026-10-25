@@ -81,7 +81,7 @@ listenfd = "1"
 # Pure-Rust X11 protocol (no Xlib, no libxcb); used by farsight-capture-x11.
 x11rb = { version = "0.13", features = ["damage", "xfixes", "xtest", "shm", "randr"] }
 thiserror = "2"
-des = "0.8"
+des = "0.9"
 aes = "0.8"
 aws-lc-rs = "1.18"
 eax = "0.5"
