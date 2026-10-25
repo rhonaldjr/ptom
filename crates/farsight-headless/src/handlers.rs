@@ -5,6 +5,7 @@ use std::os::fd::OwnedFd;
 
 use smithay::backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state};
 use smithay::desktop::{PopupKind, Window, find_popup_root_surface, get_popup_toplevel_coords};
+use smithay::input::keyboard::LedState;
 use smithay::input::pointer::{CursorImageStatus, Focus};
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
@@ -314,6 +315,13 @@ impl SeatHandler for State {
 
     fn seat_state(&mut self) -> &mut SeatState<State> {
         &mut self.seat_state
+    }
+
+    fn led_state_changed(&mut self, _seat: &Seat<Self>, leds: LedState) {
+        let bits = u8::from(leds.scroll.unwrap_or(false))
+            | u8::from(leds.num.unwrap_or(false)) << 1
+            | u8::from(leds.caps.unwrap_or(false)) << 2;
+        let _ = self.events.try_send(crate::HeadlessEvent::Leds(bits));
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {

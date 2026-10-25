@@ -90,6 +90,8 @@ pub enum HeadlessEvent {
     Cursor(Option<CursorShape>),
     /// Text an app put on the clipboard.
     Clipboard(String),
+    /// Keyboard LEDs changed: bit 0 Scroll, 1 Num, 2 Caps Lock.
+    Leds(u8),
     /// The compositor stopped; no more events follow.
     Closed(String),
 }
@@ -141,6 +143,10 @@ pub enum ResizeResult {
 
 /// Commands sent to the compositor thread.
 pub(crate) enum Command {
+    KeyCode {
+        down: bool,
+        evdev: u16,
+    },
     Key {
         down: bool,
         keysym: u32,
@@ -166,7 +172,7 @@ impl std::fmt::Debug for Command {
     /// Never shows keys or clipboard text (CLAUDE.md: don't log them).
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::Key { .. } => "Key",
+            Self::Key { .. } | Self::KeyCode { .. } => "Key",
             Self::Pointer { .. } => "Pointer",
             Self::Clipboard(_) => "Clipboard",
             Self::Viewers(_) => "Viewers",
@@ -188,6 +194,11 @@ impl Handle {
     /// A key press (`down`) or release, identified by X11 keysym.
     pub fn key(&self, down: bool, keysym: u32) {
         let _ = self.commands.send(Command::Key { down, keysym });
+    }
+
+    /// Presses or releases a physical key (Linux evdev code).
+    pub fn key_code(&self, down: bool, evdev: u16) {
+        let _ = self.commands.send(Command::KeyCode { down, evdev });
     }
 
     /// Pointer position and RFB button mask (bit 0 = left, 1 = middle,

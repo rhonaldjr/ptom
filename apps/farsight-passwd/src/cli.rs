@@ -29,6 +29,37 @@ Passwords are never accepted as command-line arguments, because other users
 of this computer can see those. farsight-passwd asks for them instead.
 ";
 
+/// `vncpasswd` compatibility (U-11): what TigerVNC's `vncpasswd` arguments
+/// mean for Farsight, as `farsight-passwd` arguments.
+///
+/// # Errors
+/// [`UsageError`] for `-f`, which would produce the weak legacy file format
+/// that Farsight never reads (ADR-0014).
+pub fn vncpasswd_args(args: &[OsString]) -> Result<Vec<OsString>, UsageError> {
+    if args.iter().any(|a| a == "-f") {
+        return Err(UsageError(
+            "Farsight doesn't use ~/.vnc/passwd files, so `vncpasswd -f` has nothing to make.\n\
+             To set the VNC password from a script: `farsight-passwd vncauth set --stdin`."
+                .into(),
+        ));
+    }
+    if args
+        .iter()
+        .any(|a| a == "-h" || a == "--help" || a == "-help")
+    {
+        return Ok(vec!["--help".into()]);
+    }
+    // `vncpasswd [file]` and `vncpasswd -view…`: set the VNC password (in
+    // Farsight's encrypted store; a file argument is not written to).
+    if !args.is_empty() {
+        eprintln!(
+            "vncpasswd (Farsight): there is no separate view-only password, and no file is written. \
+             For a watch-only viewer, give it its own account and run the agent with --view-only."
+        );
+    }
+    Ok(vec!["vncauth".into(), "set".into()])
+}
+
 /// What to do with the old file after `import`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OldFile {
@@ -210,6 +241,18 @@ fn command(positional: &[String], flags: &Flags) -> Result<Command, UsageError> 
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn vncpasswd_arguments_map_to_farsight_ones() {
+        let os = |v: &[&str]| v.iter().map(OsString::from).collect::<Vec<_>>();
+        assert_eq!(vncpasswd_args(&[]).unwrap(), os(&["vncauth", "set"]));
+        assert_eq!(
+            vncpasswd_args(&os(&["/home/me/.vnc/passwd"])).unwrap(),
+            os(&["vncauth", "set"])
+        );
+        assert_eq!(vncpasswd_args(&os(&["-help"])).unwrap(), os(&["--help"]));
+        assert!(vncpasswd_args(&os(&["-f"])).is_err());
+    }
     use super::*;
 
     fn run(args: &[&str]) -> Result<Invocation, UsageError> {

@@ -58,6 +58,7 @@ impl UserVerifier for Users {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Input {
     Key(bool, u32),
+    KeyCode(bool, u32, u16),
     Pointer(u8, u16, u16),
 }
 
@@ -77,6 +78,12 @@ impl InputSink for Recorder {
             .lock()
             .unwrap()
             .push(Input::Pointer(buttons, x, y));
+    }
+    fn key_code(&mut self, down: bool, keysym: u32, evdev: u16) {
+        self.input
+            .lock()
+            .unwrap()
+            .push(Input::KeyCode(down, keysym, evdev));
     }
 }
 
@@ -1038,4 +1045,36 @@ fn disabling_continuous_updates_is_confirmed_and_requests_resume() {
     change(&mut w.desktop, 7);
     w.run().unwrap();
     w.assert_in_sync();
+}
+
+// --- M9: physical keys and lock LEDs -----------------------------------------
+
+#[test]
+fn physical_keys_reach_the_agent_once_the_server_confirms_qemu_key_events() {
+    let mut w = World::new(Sec::None);
+    w.run().unwrap();
+    // "a" on the key in the A position (evdev 30), then an arrow (E0-prefixed).
+    w.viewer.key_with_code(true, u32::from(b'a'), 30);
+    w.viewer.key_with_code(false, u32::from(b'a'), 30);
+    w.viewer.key_with_code(true, 0xff52, 103);
+    w.run().unwrap();
+    let input = w.recorder.input.lock().unwrap().clone();
+    assert!(
+        input.contains(&Input::KeyCode(true, u32::from(b'a'), 30)),
+        "{input:?}"
+    );
+    assert!(input.contains(&Input::KeyCode(false, u32::from(b'a'), 30)));
+    assert!(input.contains(&Input::KeyCode(true, 0xff52, 103)));
+}
+
+#[test]
+fn lock_leds_are_reported_to_the_viewer() {
+    let mut w = World::new(Sec::None);
+    w.run().unwrap();
+    w.desktop.set_leds(0b100);
+    w.run().unwrap();
+    assert!(
+        w.viewer_events.contains(&ViewerEvent::Leds(0b100)),
+        "Caps Lock on"
+    );
 }

@@ -80,8 +80,13 @@ jobs:
       - name: Benchmarks (published with the release, M8)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
-          cargo bench --locked -p farsight-codec -p farsight-server -- --quick 2>&1 \
-            | grep -E 'KiB|time:|^1080p|^agent' > "dist/benchmarks-${VERSION}.txt" || true
+          out="dist/benchmarks-${VERSION}.txt"
+          cargo bench --locked -p farsight-codec -p farsight-server -- --quick > bench.log 2>&1 || true
+          grep -E 'KiB|time:|^1080p|^agent' bench.log > "$out" || true
+          # Never an empty asset (GitHub refuses those): say what happened instead.
+          if [ ! -s "$out" ]; then
+            { echo "Benchmarks did not produce results on this runner; last lines:"; tail -20 bench.log; } > "$out"
+          fi
       - name: Debian packages (farsight viewer, farsight-agent server)
         if: runner.os == 'Linux'
         run: scripts/build-deb.sh "$VERSION" "target/$TARGET/release" dist

@@ -118,7 +118,9 @@ pub enum CaptureError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InputEvent {
     Key { down: bool, keysym: u32 },
+    KeyCode { down: bool, evdev: u16 },
     Pointer { buttons: u8, x: u16, y: u16 },
+    ReleaseAll,
 }
 
 /// Sends keyboard and pointer input to the captured desktop. Cheap to clone; never blocks.
@@ -136,6 +138,16 @@ impl InputHandle {
     /// Presses (`down`) or releases an X11 keysym.
     pub fn key(&self, down: bool, keysym: u32) {
         self.send(InputEvent::Key { down, keysym });
+    }
+
+    /// Releases every key and button a viewer left pressed.
+    pub fn release_all(&self) {
+        self.send(InputEvent::ReleaseAll);
+    }
+
+    /// Presses or releases a physical key (Linux evdev code).
+    pub fn key_code(&self, down: bool, evdev: u16) {
+        self.send(InputEvent::KeyCode { down, evdev });
     }
 
     /// Moves the pointer to (`x`, `y`) in framebuffer pixels with RFB button mask `buttons`

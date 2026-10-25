@@ -11,6 +11,8 @@ After=graphical-session.target
 
 [Service]
 ExecStart=/usr/bin/farsight-agent
+# `systemctl --user reload` re-reads passwords set with farsight-passwd.
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5
 

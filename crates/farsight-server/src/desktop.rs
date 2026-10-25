@@ -49,6 +49,9 @@ pub struct Desktop {
     /// Monitor layout set by a headless desktop; empty means one screen.
     screens: Vec<Screen>,
     name_serial: u64,
+    /// Keyboard LEDs (bit 0 Scroll, 1 Num, 2 Caps Lock), if the backend knows them.
+    leds: Option<u8>,
+    led_serial: u64,
 }
 
 impl Desktop {
@@ -68,7 +71,26 @@ impl Desktop {
             clipboard_serial: 0,
             screens: Vec::new(),
             name_serial: 0,
+            leds: None,
+            led_serial: 0,
         }
+    }
+
+    /// Sets the keyboard LEDs (bit 0 Scroll, 1 Num, 2 Caps Lock); viewers
+    /// that understand `LedState` are told when they change.
+    pub fn set_leds(&mut self, leds: u8) {
+        if self.leds != Some(leds) {
+            self.leds = Some(leds);
+            self.led_serial += 1;
+        }
+    }
+
+    pub(crate) fn leds(&self) -> Option<u8> {
+        self.leds
+    }
+
+    pub(crate) fn led_serial(&self) -> u64 {
+        self.led_serial
     }
 
     /// Renames the desktop; viewers that understand `DesktopName` are told.

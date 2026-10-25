@@ -16,6 +16,15 @@ pub trait InputSink: Send {
     /// A key press (`down`) or release, identified by X11 keysym.
     fn key(&mut self, down: bool, keysym: u32);
 
+    /// A key identified by its physical position (Linux evdev code, from a
+    /// QEMU extended key event) as well as its keysym. Backends that can
+    /// press a physical key do so (layout-independent); the default uses
+    /// the keysym.
+    fn key_code(&mut self, down: bool, keysym: u32, evdev: u16) {
+        let _ = evdev;
+        self.key(down, keysym);
+    }
+
     /// Pointer position (clamped to the framebuffer the viewer knows) and
     /// button mask (bit 0 = left, 1 = middle, 2 = right, 3/4 = wheel).
     fn pointer(&mut self, buttons: u8, x: u16, y: u16);

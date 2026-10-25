@@ -130,6 +130,8 @@ pub enum SessionEvent {
     Damaged(Rect),
     /// The server renamed its desktop.
     Renamed(String),
+    /// The remote keyboard LEDs: bit 0 Scroll, 1 Num, 2 Caps Lock.
+    Leds(u8),
     /// The framebuffer was resized.
     Resized {
         /// New width.
@@ -157,6 +159,17 @@ enum Pending {
     TlsIdentity,
 }
 
+/// Optional protocol features negotiated with the server.
+#[derive(Debug, Default, Clone, Copy)]
+struct Features {
+    /// The server pushes updates without being asked (continuous updates).
+    continuous: bool,
+    /// The server announced continuous updates (only the first one counts).
+    continuous_offered: bool,
+    /// The server accepts QEMU extended key events.
+    qemu_keys: bool,
+}
+
 /// One viewer connection, independent of sockets and UI.
 pub struct Session {
     config: SessionConfig,
@@ -168,10 +181,10 @@ pub struct Session {
     encrypted: bool,
     presented_identity: Option<(IdentityKind, Fingerprint)>,
     last_clipboard: Option<String>,
-    /// The server pushes updates without being asked (continuous updates).
-    continuous: bool,
-    /// The server announced continuous updates (only the first time counts).
-    continuous_offered: bool,
+    /// Optional protocol features the server turned on.
+    features: Features,
+    /// Keys currently pressed as QEMU key events (by evdev code).
+    keys_by_code: std::collections::HashSet<u16>,
     /// Bytes that arrived over TLS while the user was still checking the
     /// server's identity. They are protected, but the connection hasn't been
     /// told about the upgrade yet, so they wait here until it has.
@@ -201,8 +214,8 @@ impl Session {
             presented_identity: None,
             last_clipboard: None,
             held_after_upgrade: Vec::new(),
-            continuous: false,
-            continuous_offered: false,
+            features: Features::default(),
+            keys_by_code: std::collections::HashSet::new(),
         }
     }
 
@@ -396,6 +409,33 @@ impl Session {
         self.send_input(&ClientMessage::KeyEvent { down, keysym });
     }
 
+    /// Sends a key with its physical position (Linux evdev code) when the
+    /// server confirmed QEMU extended key events, so the remote layout
+    /// decides what it types; otherwise like [`Self::key`].
+    pub fn key_with_code(&mut self, down: bool, keysym: u32, evdev: u16) {
+        // A key is released the way it was pressed, even if QEMU key events
+        // were confirmed in between (else the server sees no release).
+        let as_code = if down {
+            let as_code = self.features.qemu_keys;
+            if as_code {
+                self.keys_by_code.insert(evdev);
+            }
+            as_code
+        } else {
+            self.keys_by_code.remove(&evdev)
+        };
+        match farsight_rfb::keycode::evdev_to_xt(evdev) {
+            Some(keycode) if as_code => {
+                self.send_input(&ClientMessage::QemuKeyEvent {
+                    down,
+                    keysym,
+                    keycode,
+                });
+            }
+            _ => self.key(down, keysym),
+        }
+    }
+
     /// Sends pointer state, clamped to the framebuffer (ignored in view-only mode).
     pub fn pointer(&mut self, buttons: u8, x: u16, y: u16) {
         let fb = self.decoder.framebuffer();
@@ -482,28 +522,30 @@ impl Session {
                     });
                 }
                 ClientEvent::Rect(header) => {
-                    let event = self.on_rect(&header);
-                    if matches!(event, SessionEvent::Resized { .. }) && self.continuous {
+                    let Some(event) = self.on_rect(&header) else {
+                        continue;
+                    };
+                    if matches!(event, SessionEvent::Resized { .. }) && self.features.continuous {
                         self.enable_continuous()?;
                     }
                     events.push(event);
                 }
                 ClientEvent::UpdateComplete => {
                     // In continuous mode the server sends updates unasked.
-                    if !self.continuous {
+                    if !self.features.continuous {
                         self.request_update(true)?;
                     }
                     events.push(SessionEvent::UpdateComplete);
                 }
                 ClientEvent::ContinuousUpdatesEnded => {
-                    if !self.continuous_offered {
+                    if !self.features.continuous_offered {
                         // The first one announces support: switch over once.
-                        self.continuous_offered = true;
-                        self.continuous = true;
+                        self.features.continuous_offered = true;
+                        self.features.continuous = true;
                         self.enable_continuous()?;
-                    } else if self.continuous {
+                    } else if self.features.continuous {
                         // The server stopped them: go back to asking, for good.
-                        self.continuous = false;
+                        self.features.continuous = false;
                         self.request_update(true)?;
                     }
                 }
@@ -642,8 +684,8 @@ impl Session {
         self.request_update(false)
     }
 
-    fn on_rect(&mut self, header: &RectHeader) -> SessionEvent {
-        match header.encoding {
+    fn on_rect(&mut self, header: &RectHeader) -> Option<SessionEvent> {
+        Some(match header.encoding {
             Encoding::DesktopSize | Encoding::ExtendedDesktopSize => {
                 let fb = self.decoder.framebuffer();
                 SessionEvent::Resized {
@@ -652,17 +694,22 @@ impl Session {
                 }
             }
             Encoding::Cursor | Encoding::CursorWithAlpha => SessionEvent::CursorChanged,
+            Encoding::QemuExtendedKeyEvent => {
+                self.features.qemu_keys = true;
+                return None;
+            }
+            Encoding::LedState => SessionEvent::Leds(self.decoder.take_leds().unwrap_or(0)),
             Encoding::DesktopName => {
                 SessionEvent::Renamed(self.decoder.take_name().unwrap_or_default())
             }
             _ => SessionEvent::Damaged(header.rect),
-        }
+        })
     }
 
     /// Whether the server pushes updates unasked (continuous updates).
     #[must_use]
     pub fn continuous_updates(&self) -> bool {
-        self.continuous
+        self.features.continuous
     }
 
     fn enable_continuous(&mut self) -> Result<(), ProtocolError> {
@@ -695,6 +742,8 @@ impl Session {
             Encoding::DesktopName,
             Encoding::ContinuousUpdates,
             Encoding::Fence,
+            Encoding::QemuExtendedKeyEvent,
+            Encoding::LedState,
         ];
         if !self.config.no_jpeg {
             list.push(Encoding::JpegQuality(self.config.quality.unwrap_or(8)));

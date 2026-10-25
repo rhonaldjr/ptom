@@ -17,6 +17,8 @@ pub enum Event {
     Frame(Framebuffer, Option<Vec<Rect>>, u64),
     Cursor(Option<Cursor>),
     Clipboard(String),
+    /// Keyboard LEDs: bit 0 Scroll, 1 Num, 2 Caps Lock.
+    Leds(u8),
     Closed(String),
 }
 
@@ -36,6 +38,16 @@ impl Input {
             Self::Headless(i) => i.key(down, keysym),
             #[cfg(feature = "wayland")]
             Self::Wayland(i) => i.key(down, keysym),
+        }
+    }
+
+    /// A physical key (Linux evdev code) from a QEMU key event.
+    pub fn key_code(&self, down: bool, keysym: u32, evdev: u16) {
+        match self {
+            Self::X11(i) => i.key_code(down, keysym, evdev),
+            Self::Headless(i) => i.key_code(down, evdev),
+            #[cfg(feature = "wayland")]
+            Self::Wayland(i) => i.key_code(down, evdev),
         }
     }
 
@@ -60,12 +72,14 @@ impl Input {
 }
 
 impl Input {
-    /// Lets go of every key and button the desktop thinks is held, so the
-    /// next controller doesn't inherit them (U-9). Only headless desktops
-    /// change hands.
+    /// Lets go of every key and button viewers left held, so the next
+    /// controller (U-9) or the person at the screen doesn't inherit them.
     pub fn release_all(&self) {
-        if let Self::Headless(i) = self {
-            i.release_all();
+        match self {
+            Self::X11(i) => i.release_all(),
+            Self::Headless(i) => i.release_all(),
+            #[cfg(feature = "wayland")]
+            Self::Wayland(i) => i.release_all(),
         }
     }
 }
@@ -90,6 +104,8 @@ pub async fn shutdown(input: &Input, compositor: Option<std::thread::JoinHandle<
 
 /// What a headless desktop needs (M7).
 pub struct HeadlessSetup {
+    /// For the X11 backend: the display to open (`None` = `$DISPLAY`).
+    pub x11_display: Option<String>,
     /// The umask the session's apps get (the agent itself runs with 077).
     pub session_umask: Option<u32>,
     pub width: u16,
@@ -107,7 +123,7 @@ pub async fn start(
     headless: HeadlessSetup,
 ) -> Result<Capture> {
     match backend {
-        Backend::X11 | Backend::Auto => start_x11(),
+        Backend::X11 | Backend::Auto => start_x11(headless.x11_display),
         Backend::Headless => start_headless(headless),
         #[cfg(feature = "wayland")]
         Backend::Wayland => start_wayland(token_file).await,
@@ -191,6 +207,7 @@ fn start_headless(setup: HeadlessSetup) -> Result<Capture> {
                     c.and_then(|c| Cursor::from_rgba(c.width, c.height, c.hotspot, c.rgba)),
                 ),
                 HeadlessEvent::Clipboard(text) => Event::Clipboard(text),
+                HeadlessEvent::Leds(leds) => Event::Leds(leds),
                 HeadlessEvent::Closed(reason) => Event::Closed(reason),
             };
             if tx.send(mapped).await.is_err() {
@@ -205,9 +222,13 @@ fn start_headless(setup: HeadlessSetup) -> Result<Capture> {
     })
 }
 
-fn start_x11() -> Result<Capture> {
+fn start_x11(display: Option<String>) -> Result<Capture> {
     use farsight_capture_x11::{CaptureEvent, Options, start};
-    let started = start(Options::default()).context("could not share the X11 display")?;
+    let started = start(Options {
+        display,
+        ..Options::default()
+    })
+    .context("could not share the X11 display")?;
     let (tx, rx) = mpsc::channel(4);
     let mut events = started.events;
     tokio::spawn(async move {

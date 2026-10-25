@@ -60,38 +60,50 @@ jobs:
         run: dbus-run-session -- env FARSIGHT_TRAY_TEST=1 cargo test -p farsight-desktop --test tray_host --locked
 
   interop:
-    # Black-box interop against real TigerVNC servers (ADR-0011 allows this).
+    # Black-box interop against real VNC servers (ADR-0011 allows this).
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { base: "debian:bookworm-slim", security: VncAuth, encrypted: "0" }
-          - { base: "debian:bookworm-slim", security: None, encrypted: "0" }
-          - { base: "debian:trixie-slim", security: X509Vnc, encrypted: "1" }
-          - { base: "debian:trixie-slim", security: RA2, encrypted: "1" }
-          - { base: "debian:trixie-slim", security: RA2_256, encrypted: "1" }
-    name: interop (${{ matrix.security }})
+          - { server: tigervnc, base: "debian:bookworm-slim", security: VncAuth, encrypted: "0" }
+          - { server: tigervnc, base: "debian:bookworm-slim", security: None, encrypted: "0" }
+          - { server: tigervnc, base: "debian:trixie-slim", security: X509Vnc, encrypted: "1" }
+          - { server: tigervnc, base: "debian:trixie-slim", security: RA2, encrypted: "1" }
+          - { server: tigervnc, base: "debian:trixie-slim", security: RA2_256, encrypted: "1" }
+          - { server: tightvnc, base: "debian:bookworm-slim", security: VncAuth, encrypted: "0" }
+    name: interop (${{ matrix.server }} ${{ matrix.security }})
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Start TigerVNC
+      - name: Start the server
         run: |
-          docker build --build-arg BASE=${{ matrix.base }} -t farsight-interop-tigervnc tests/interop/tigervnc
-          docker run -d -e SECURITY=${{ matrix.security }} -p 127.0.0.1:15901:5901 farsight-interop-tigervnc
+          docker build --build-arg BASE=${{ matrix.base }} -t farsight-interop tests/interop/${{ matrix.server }}
+          docker run -d -e SECURITY=${{ matrix.security }} -p 127.0.0.1:15901:5901 farsight-interop
           # Wait for the RFB greeting rather than a fixed time (X509 setups start slower).
           for _ in $(seq 60); do
             if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/15901 && head -c 4 <&3' 2>/dev/null | grep -q RFB; then exit 0; fi
             sleep 1
           done
           docker logs "$(docker ps -lq)"
-          echo "::error title=interop::TigerVNC did not start"
+          echo "::error title=interop::the VNC server did not start"
           exit 1
       - run: cargo test -p farsight-net --test interop_tigervnc --locked -- --nocapture
         env:
           FARSIGHT_INTEROP_ADDR: 127.0.0.1::15901
           FARSIGHT_INTEROP_EXPECT_ENCRYPTED: ${{ matrix.encrypted }}
+
+  viewer-interop:
+    # The other direction: TigerVNC's own viewer connects to the Farsight agent.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libpixman-1-dev
+      - run: cargo build -p farsight-agent -p farsight-passwd --locked
+      - run: tests/e2e/tigervnc-viewer.sh
 
   agent-e2e:
     # farsight-agent sharing a real X server (Xvfb), checked by a Farsight viewer session (M5).
@@ -103,6 +115,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils x11-xserver-utils libxkbcommon-dev libpixman-1-dev
       - run: cargo build -p farsight-agent -p farsight-passwd --locked
       - run: tests/e2e/agent-x11.sh
+      - run: tests/e2e/compat-names.sh
 
   headless:
     # M7: the headless compositor with real apps. Ubuntu 24.04 for Xwayland 23.1+

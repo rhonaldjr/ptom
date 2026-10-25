@@ -52,8 +52,7 @@ pub struct Settings {
     pub owner: Option<String>,
     pub tls: TlsAcceptor,
     pub ra2: Arc<Ra2ServerKey>,
-    pub verifier: Option<Arc<dyn UserVerifier>>,
-    pub vnc_password: Option<SecretString>,
+    pub logins: Logins,
     pub allow_legacy: bool,
     pub view_only: bool,
     /// A headless desktop (M7): nobody sits at it, so there's no approval
@@ -61,9 +60,25 @@ pub struct Settings {
     pub headless: bool,
 }
 
+/// How viewers may log in; reloadable at run time (SIGHUP, M9).
+#[derive(Clone, Default)]
+pub struct Logins {
+    pub verifier: Option<Arc<dyn UserVerifier>>,
+    pub vnc_password: Option<SecretString>,
+}
+
+impl Logins {
+    /// Whether anyone can log in with a password.
+    pub fn any(&self) -> bool {
+        self.verifier.is_some() || self.vnc_password.is_some()
+    }
+}
+
 /// State shared by all viewer tasks.
 pub struct Agent {
     settings: Settings,
+    /// Current logins (starts as `settings.logins`, replaced by reloads).
+    logins: Mutex<Logins>,
     desktop: Mutex<Desktop>,
     version: watch::Sender<u64>,
     clipboard: broadcast::Sender<String>,
@@ -101,7 +116,9 @@ async fn write(transport: &mut Transport, bytes: &[u8]) -> Result<()> {
 impl Agent {
     pub fn new(settings: Settings, desktop_name: String, input: Input) -> Arc<Self> {
         let settings_headless = settings.headless;
+        let logins = Mutex::new(settings.logins.clone());
         Arc::new(Self {
+            logins,
             settings,
             desktop: Mutex::new(Desktop::new(0, 0, desktop_name)),
             version: watch::channel(0).0,
@@ -121,6 +138,18 @@ impl Agent {
 
     fn now_ms(&self) -> u64 {
         millis(self.started.elapsed())
+    }
+
+    /// Replaces how viewers log in (passwords changed with
+    /// `farsight-passwd`); connected viewers stay. A headless desktop keeps
+    /// its old logins rather than lose its password.
+    pub fn reload_logins(&self, logins: Logins) {
+        if self.settings.headless && !logins.any() {
+            warn!("not reloading: a headless desktop needs a password");
+            return;
+        }
+        *lock(&self.logins) = logins;
+        info!("reloaded the agent's passwords");
     }
 
     /// Starts the tray icon; "Disconnect everyone" ends every session.
@@ -183,6 +212,10 @@ impl Agent {
                     lock(&self.desktop).set_cursor(cursor);
                     self.version.send_modify(|v| *v = v.wrapping_add(1));
                 }
+                Event::Leds(leds) => {
+                    lock(&self.desktop).set_leds(leds);
+                    self.version.send_modify(|v| *v = v.wrapping_add(1));
+                }
                 Event::Clipboard(text) => {
                     let _ = self.clipboard.send(text);
                 }
@@ -239,6 +272,10 @@ impl Agent {
                 self.input.release_all();
             }
             control.disconnected(id);
+        } else if !self.settings.view_only {
+            // A live desktop: a viewer that drops mid-keypress mustn't leave
+            // Ctrl or Super held on the user's own session.
+            self.input.release_all();
         }
         lock(&self.tasks).remove(&id);
         let left = lock(&self.viewers).remove(&id);
@@ -255,8 +292,9 @@ impl Agent {
         config.allow_legacy = self.settings.allow_legacy;
         config.tls_available = true;
         config.ra2_key = Some(Arc::clone(&self.settings.ra2));
-        config.user_verifier.clone_from(&self.settings.verifier);
-        config.vnc_password.clone_from(&self.settings.vnc_password);
+        let logins = lock(&self.logins).clone();
+        config.user_verifier.clone_from(&logins.verifier);
+        config.vnc_password.clone_from(&logins.vnc_password);
         config.owner.clone_from(&self.settings.owner);
         config.view_only = self.settings.view_only;
         config.prompt_non_owner = !self.settings.headless;
@@ -264,16 +302,12 @@ impl Agent {
         config.send_clipboard = !self.settings.view_only;
         // Legacy types as documented (ADR-0018, P-26); `SecurityPolicy` still
         // drops them off-loopback unless --allow-legacy.
-        if self.settings.vnc_password.is_some() {
+        if logins.vnc_password.is_some() {
             config.security_types.push(SecurityType::VncAuth);
         }
         // Never on a headless desktop: nobody is there to approve (it also
         // refuses to start without a password).
-        if loopback
-            && !self.settings.headless
-            && self.settings.verifier.is_none()
-            && self.settings.vnc_password.is_none()
-        {
+        if loopback && !self.settings.headless && !logins.any() {
             config.security_types.push(SecurityType::None);
         }
         config
@@ -595,6 +629,12 @@ impl InputSink for InputBridge {
     fn key(&mut self, down: bool, keysym: u32) {
         if self.1.open() {
             self.0.key(down, keysym);
+        }
+    }
+
+    fn key_code(&mut self, down: bool, keysym: u32, evdev: u16) {
+        if self.1.open() {
+            self.0.key_code(down, keysym, evdev);
         }
     }
 

@@ -44,6 +44,8 @@ pub struct AgentOptions {
     pub display: Option<u32>,
     /// Headless startup script (`--startup`); default in the config folder.
     pub startup: Option<std::path::PathBuf>,
+    /// X display to share (`x0vncserver -display`); `$DISPLAY` otherwise.
+    pub x11_display: Option<String>,
 }
 
 impl Default for AgentOptions {
@@ -61,6 +63,7 @@ impl Default for AgentOptions {
             geometry: (1920, 1080),
             display: None,
             startup: None,
+            x11_display: None,
         }
     }
 }

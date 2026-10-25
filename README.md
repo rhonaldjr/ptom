@@ -46,7 +46,8 @@ Sharing and other VNC software.
 | ✅ M6 | Tabs, windows and the tray icon |
 | ✅ M7 | Desktops that keep running in the background |
 | ✅ M8 | Faster, smaller updates: every VNC encoding, automatic JPEG for photos, smooth streaming |
-| M9–M10 | Wider compatibility, and hardware acceleration |
+| ✅ M9 | Works like TigerVNC: same command names (optional), physical keys for any layout, lock-key indicators |
+| M10 | Hardware acceleration |
 
 The full plan is in [docs/roadmap/ROADMAP.md](docs/roadmap/ROADMAP.md).
 
@@ -101,6 +102,8 @@ systemctl --user enable --now farsight-agent    # start sharing now and at every
 
 - To let viewers find this computer automatically at home, run `farsight-agent --trust-this-network` once while on your
   home network. The agent announces itself only on networks you've marked this way, never on café or office Wi-Fi.
+- After changing passwords with `farsight-passwd`, `systemctl --user reload farsight-agent` applies them without
+  disconnecting anyone.
 - By default only this computer can connect. To allow your network, run
   `systemctl --user edit farsight-agent` and add `--listen lan` to the command. Network connections are always encrypted.
 - On Wayland, your desktop asks once whether Farsight may share the screen. Farsight remembers the answer;
@@ -108,6 +111,16 @@ systemctl --user enable --now farsight-agent    # start sharing now and at every
 - When **you** connect with your own account, you get straight in. Anyone else has to be approved by whoever is at the
   screen (it's denied after 30 seconds). A tray icon and a notification always show when someone is viewing,
   with **Disconnect everyone**.
+
+## Coming from TigerVNC
+
+- Install the optional `farsight-tigervnc-compat` package and `vncviewer`, `vncserver`, `x0vncserver`, `w0vncserver`
+  and `vncpasswd` run Farsight, with TigerVNC's options (it replaces the TigerVNC packages rather than hiding them).
+- `vncserver :1 -geometry 1280x800` starts a headless desktop in the background; `vncserver -list` and
+  `vncserver -kill :1` work too.
+- The viewer picks up your TigerVNC viewer settings (quality, view-only and so on) as its defaults, and `vncserver`
+  reads `geometry` and `localhost` from TigerVNC's config. Farsight never changes those files.
+- Bring your old VNC password over once with `farsight-passwd import`.
 
 ## Desktops that keep running (headless)
 
@@ -140,6 +153,8 @@ farsight-passwd vncauth set         # a password for older viewers (weak; for co
 farsight-passwd import              # bring over an existing ~/.vnc/passwd
 ```
 - Resizing the window resizes the remote desktop when the server allows it (turn this off with `-RemoteResize=0`).
+- Keys are sent by their position on the keyboard when the server supports it, so any keyboard layout works.
+- The F8 menu sends keys your own desktop would otherwise catch: Ctrl+Alt+Del, Super, Alt+Tab, Alt+F4, Print Screen.
 - Photos and videos are sent as JPEG to save bandwidth; text and windows stay sharp. Use `-NoJPEG` for exact
   pixels everywhere, or `-QualityLevel 0-9` to trade quality for speed.
 - Farsight accepts TigerVNC's `vncviewer` options. Run `farsight --help` to see them.

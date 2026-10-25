@@ -18,7 +18,31 @@ use crate::commands::Context;
 use crate::console::SystemConsole;
 
 fn main() -> ExitCode {
-    let invocation = match cli::parse(std::env::args_os().skip(1)) {
+    let mut args: Vec<_> = std::env::args_os().collect();
+    let program = args.first().and_then(|p| {
+        std::path::Path::new(p)
+            .file_name()
+            .map(std::borrow::ToOwned::to_owned)
+    });
+    let args = if program.as_deref() == Some(std::ffi::OsStr::new("vncpasswd")) {
+        // Called through the TigerVNC compatibility name (U-11).
+        match cli::vncpasswd_args(args.get(1..).unwrap_or_default()) {
+            Ok(mapped) => {
+                eprintln!(
+                    "vncpasswd (Farsight): the password is kept in Farsight's encrypted store, \
+                     not in ~/.vnc/passwd."
+                );
+                mapped
+            }
+            Err(e) => {
+                eprintln!("vncpasswd: {e}");
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        args.drain(1..).collect()
+    };
+    let invocation = match cli::parse(args) {
         Ok(invocation) => invocation,
         Err(e) => {
             eprintln!("farsight-passwd: {e}\nRun `farsight-passwd --help` for usage.");

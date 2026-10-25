@@ -10,6 +10,7 @@ use cosmic::iced::keyboard::{Key, Location, key::Named, key::Physical};
 use cosmic::iced::{Alignment, Length, Point, Size, mouse, window};
 use cosmic::prelude::*;
 use cosmic::widget::{self, image};
+use farsight_client::keysym::named as k;
 use farsight_client::{Fingerprint, IdentityKind, ServerAddress, SessionConfig, SessionEvent};
 use farsight_net::{Command, ConnectionHandle, CursorImage, Update};
 use farsight_rfb::SecurityType;
@@ -23,8 +24,16 @@ use crate::views::{CursorOverlay, Mapping, centred, format_fingerprint};
 /// Identifies a tab for the lifetime of the app.
 pub type TabId = u64;
 
-/// Keysyms sent by the "Send Ctrl+Alt+Del" menu entry.
-const CTRL_ALT_DEL: [u32; 3] = [0xffe3, 0xffe9, 0xffff];
+/// Key combinations the menu can send: the local desktop would otherwise
+/// take them (system-key capture, M9). Keysyms pressed in order, released in
+/// reverse.
+const KEY_COMBOS: [(&str, &[u32]); 5] = [
+    ("Ctrl+Alt+Del", &[k::CONTROL_L, k::ALT_L, k::DELETE]),
+    ("Super", &[k::SUPER_L]),
+    ("Alt+Tab", &[k::ALT_L, k::TAB]),
+    ("Alt+F4", &[k::ALT_L, k::F1 + 3]),
+    ("Print Screen", &[k::PRINT]),
+];
 /// Wheel distance, in pixels, that counts as one notch.
 const PIXELS_PER_NOTCH: f32 = 50.0;
 
@@ -82,9 +91,13 @@ pub enum TabMessage {
     ToggleMenu,
     ToggleFullscreen,
     ToggleViewOnly,
-    SendCtrlAltDel,
+    /// Send `KEY_COMBOS[index]`.
+    SendCombo(usize),
     MoveToWindow,
-    PointerMoved { remote: (u16, u16), local: Point },
+    PointerMoved {
+        remote: (u16, u16),
+        local: Point,
+    },
 }
 
 /// What the app must do after a tab handled something.
@@ -102,6 +115,8 @@ pub struct Connected {
     pub name: String,
     pub security: SecurityType,
     pub encrypted: bool,
+    /// Remote keyboard LEDs (bit 1 Num, 2 Caps Lock), if the server sends them.
+    pub leds: Option<u8>,
 }
 
 #[allow(clippy::struct_excessive_bools)] // Independent UI toggles.
@@ -123,7 +138,7 @@ pub struct Tab {
     buttons: u8,
     pointer: (u16, u16),
     scroll_accumulator: (f32, f32),
-    pressed_keys: HashMap<Physical, u32>,
+    pressed_keys: HashMap<Physical, (u32, Option<u16>)>,
     stored_credentials: Option<Remember>,
     pending_remember: Option<Remember>,
     username_input: String,
@@ -222,15 +237,16 @@ impl Tab {
                 self.view_only = !self.view_only;
                 self.command(Command::SetViewOnly(self.view_only));
             }
-            TabMessage::SendCtrlAltDel => {
+            TabMessage::SendCombo(index) => {
                 self.menu_open = false;
-                for keysym in CTRL_ALT_DEL {
+                let keys = KEY_COMBOS.get(index).map_or(&[][..], |(_, keys)| *keys);
+                for &keysym in keys {
                     self.command(Command::Key { down: true, keysym });
                 }
-                for keysym in CTRL_ALT_DEL.iter().rev() {
+                for &keysym in keys.iter().rev() {
                     self.command(Command::Key {
                         down: false,
-                        keysym: *keysym,
+                        keysym,
                     });
                 }
             }
@@ -328,8 +344,14 @@ impl Tab {
                     name,
                     security,
                     encrypted,
+                    leds: None,
                 });
                 self.screen = TabScreen::Desktop;
+            }
+            SessionEvent::Leds(leds) => {
+                if let Some(connected) = &mut self.connected {
+                    connected.leds = Some(leds);
+                }
             }
             SessionEvent::Renamed(name) => {
                 if let Some(connected) = &mut self.connected {
@@ -367,26 +389,21 @@ impl Tab {
         }
         if pressed {
             if let Some(keysym) = keymap::keysym(key, modified, location) {
-                self.pressed_keys.insert(physical, keysym);
-                self.command(Command::Key { down: true, keysym });
+                let evdev = keymap::evdev(physical);
+                self.pressed_keys.insert(physical, (keysym, evdev));
+                self.command(key_command(true, keysym, evdev));
             }
-        } else if let Some(keysym) = self.pressed_keys.remove(&physical) {
+        } else if let Some((keysym, evdev)) = self.pressed_keys.remove(&physical) {
             // Release with the keysym we pressed, even if modifiers changed since.
-            self.command(Command::Key {
-                down: false,
-                keysym,
-            });
+            self.command(key_command(false, keysym, evdev));
         }
     }
 
     /// Releases every key still held (when focus moves to another tab).
     pub fn release_keys(&mut self) {
-        for (_, keysym) in self.pressed_keys.drain() {
+        for (_, (keysym, evdev)) in self.pressed_keys.drain() {
             if let Some(handle) = &self.handle {
-                let _ = handle.send(Command::Key {
-                    down: false,
-                    keysym,
-                });
+                let _ = handle.send(key_command(false, keysym, evdev));
             }
         }
     }
@@ -777,11 +794,13 @@ impl Tab {
                     "View only"
                 })
                 .on_press(self.message(TabMessage::ToggleViewOnly)),
-            )
-            .push(
-                widget::button::standard("Send Ctrl+Alt+Del")
-                    .on_press(self.message(TabMessage::SendCtrlAltDel)),
             );
+        for (index, (label, _)) in KEY_COMBOS.iter().enumerate() {
+            row = row.push(
+                widget::button::standard(format!("Send {label}"))
+                    .on_press(self.message(TabMessage::SendCombo(index))),
+            );
+        }
         if self.window.is_none() {
             row = row.push(
                 widget::button::standard("Move to new window")
@@ -813,12 +832,18 @@ pub fn security_badge(connected: &Connected) -> Element<'_, Message> {
             format!("Not encrypted ({:?})", connected.security),
         )
     };
-    widget::Row::new()
+    let mut row = widget::Row::new()
         .push(widget::icon::from_name(icon).size(16))
-        .push(widget::text::body(label))
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .into()
+        .push(widget::text::body(label));
+    // The remote lock keys, so typing in caps by surprise is visible.
+    if let Some(leds) = connected.leds {
+        for (bit, name) in [(2, "Caps Lock"), (1, "Num Lock")] {
+            if leds & (1 << bit) != 0 {
+                row = row.push(widget::text::caption(name));
+            }
+        }
+    }
+    row.spacing(4).align_y(Alignment::Center).into()
 }
 
 /// Runs one connection and streams its progress to the app.
@@ -858,4 +883,16 @@ pub fn connection(
             }
         }
     })
+}
+
+/// A key command, with the physical key when known (QEMU key events).
+fn key_command(down: bool, keysym: u32, evdev: Option<u16>) -> Command {
+    match evdev {
+        Some(evdev) => Command::PhysicalKey {
+            down,
+            keysym,
+            evdev,
+        },
+        None => Command::Key { down, keysym },
+    }
 }

@@ -23,21 +23,22 @@ fn main() -> ExitCode {
         )
         .init();
 
-    let options = match Command::parse(std::env::args().skip(1)) {
-        Ok(Command::Run(options)) => options,
-        Ok(Command::Help) => {
-            print!("{USAGE}");
-            return ExitCode::SUCCESS;
-        }
-        Ok(Command::Version) => {
-            println!("farsight {}", env!("CARGO_PKG_VERSION"));
-            return ExitCode::SUCCESS;
-        }
-        Err(error) => {
-            eprintln!("farsight: {error}");
-            return ExitCode::from(2);
-        }
-    };
+    let options =
+        match Command::parse_with_defaults(saved_tigervnc_settings(), std::env::args().skip(1)) {
+            Ok(Command::Run(options)) => options,
+            Ok(Command::Help) => {
+                print!("{USAGE}");
+                return ExitCode::SUCCESS;
+            }
+            Ok(Command::Version) => {
+                println!("farsight {}", env!("CARGO_PKG_VERSION"));
+                return ExitCode::SUCCESS;
+            }
+            Err(error) => {
+                eprintln!("farsight: {error}");
+                return ExitCode::from(2);
+            }
+        };
 
     let settings = Settings::default().size(Size::new(1280.0, 800.0));
     match cosmic::app::run::<app::App>(settings, options) {
@@ -47,4 +48,22 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Settings a TigerVNC viewer saved, used as defaults (M9): its config
+/// folder first, then the older `~/.vnc`. Read only.
+fn saved_tigervnc_settings() -> farsight_client::options::ViewerOptions {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| home.as_ref().map(|h| h.join(".config")));
+    [
+        config.map(|c| c.join("tigervnc").join("default.tigervnc")),
+        home.map(|h| h.join(".vnc").join("default.tigervnc")),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|path| std::fs::read_to_string(path).ok())
+    .map(|text| farsight_client::options::tigervnc_defaults(&text))
+    .unwrap_or_default()
 }

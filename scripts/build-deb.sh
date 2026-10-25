@@ -80,3 +80,47 @@ package farsight "Farsight remote desktop viewer (VNC)" \
 package farsight-agent "Farsight desktop sharing agent (VNC server)" \
   "Shares your live X11 or Wayland desktop over VNC, encrypted, with approval prompts. Replaces x0vncserver and vncpasswd." \
   "xdg-desktop-portal, xkb-data" farsight-agent farsight-passwd
+
+# Optional TigerVNC compatibility names (U-11): symlinks only. It conflicts
+# with the packages that own these names, so it never silently shadows them.
+compat="$work/farsight-tigervnc-compat"
+install -d "$compat/DEBIAN" "$compat/usr/share/doc/farsight-tigervnc-compat"
+# The names go through update-alternatives (as Debian's VNC packages do), at a
+# low priority, rather than as plain files that would clash with other providers.
+names="vncviewer:farsight vncpasswd:farsight-passwd vncserver:farsight-agent x0vncserver:farsight-agent w0vncserver:farsight-agent"
+{
+  echo '#!/bin/sh'
+  echo 'set -e'
+  echo 'if [ "$1" = configure ]; then'
+  for pair in $names; do
+    echo "  update-alternatives --install /usr/bin/${pair%%:*} ${pair%%:*} /usr/bin/${pair#*:} 10"
+  done
+  echo 'fi'
+} > "$compat/DEBIAN/postinst"
+{
+  echo '#!/bin/sh'
+  echo 'set -e'
+  echo 'if [ "$1" = remove ] || [ "$1" = deconfigure ]; then'
+  for pair in $names; do
+    echo "  update-alternatives --remove ${pair%%:*} /usr/bin/${pair#*:}"
+  done
+  echo 'fi'
+} > "$compat/DEBIAN/prerm"
+chmod 0755 "$compat/DEBIAN/postinst" "$compat/DEBIAN/prerm"
+install -m 0644 "$root/LICENSE" "$compat/usr/share/doc/farsight-tigervnc-compat/copyright"
+cat > "$compat/DEBIAN/control" <<CONTROL
+Package: farsight-tigervnc-compat
+Version: $version
+Architecture: all
+Maintainer: Farsight developers <https://github.com/rhonaldjr/ptom>
+Homepage: https://github.com/rhonaldjr/ptom
+Section: net
+Priority: optional
+Depends: farsight (= $version), farsight-agent (= $version)
+Conflicts: tigervnc-viewer, tigervnc-standalone-server, tigervnc-scraping-server, tigervnc-tools, xtightvncviewer, tightvncserver, tightvncpasswd
+Description: TigerVNC command names for Farsight (vncviewer, vncserver, ...)
+ Makes vncviewer, vncserver, x0vncserver, w0vncserver and vncpasswd run
+ Farsight, accepting TigerVNC's options, so scripts and habits keep working.
+CONTROL
+dpkg-deb --root-owner-group --build "$compat" "$out/farsight-tigervnc-compat_${version}_all.deb" >/dev/null
+echo "$out/farsight-tigervnc-compat_${version}_all.deb"

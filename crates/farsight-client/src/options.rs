@@ -118,7 +118,19 @@ impl Command {
     /// [`OptionsError`] for unknown options, missing or invalid values, or a
     /// malformed address.
     pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Self, OptionsError> {
-        let mut options = ViewerOptions::default();
+        Self::parse_with_defaults(ViewerOptions::default(), args)
+    }
+
+    /// Like [`Self::parse`], starting from `defaults` (e.g. TigerVNC's saved
+    /// settings, see [`tigervnc_defaults`]); the command line wins.
+    ///
+    /// # Errors
+    /// As for [`Self::parse`].
+    pub fn parse_with_defaults<I: IntoIterator<Item = String>>(
+        defaults: ViewerOptions,
+        args: I,
+    ) -> Result<Self, OptionsError> {
+        let mut options = defaults;
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             let Some(flag) = arg.strip_prefix("--").or_else(|| arg.strip_prefix('-')) else {
@@ -168,6 +180,44 @@ fn value(
         .ok_or_else(|| OptionsError::MissingValue(name.to_owned()))
 }
 
+/// Viewer defaults from a TigerVNC viewer settings file (`default.tigervnc`:
+/// a header line, then `Name=value` lines). Only settings Farsight has are
+/// read; unknown or invalid lines are skipped, and the saved server address
+/// is not used (Farsight never connects by itself).
+#[must_use]
+pub fn tigervnc_defaults(text: &str) -> ViewerOptions {
+    let mut options = ViewerOptions::default();
+    // TigerVNC saves every setting after each connection; with AutoSelect on
+    // (its default) the levels it saved weren't the user's choice.
+    let auto_select = !text.lines().any(|l| {
+        l.split_once('=')
+            .is_some_and(|(n, v)| n.trim().eq_ignore_ascii_case("autoselect") && v.trim() == "0")
+    });
+    for line in text.lines().skip_while(|l| l.starts_with("TigerVNC")) {
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        let (name, value) = (name.trim().to_ascii_lowercase(), value.trim());
+        let flag = boolean(&name, Some(value)).ok();
+        match name.as_str() {
+            "viewonly" => options.view_only = flag.unwrap_or(options.view_only),
+            "fullscreen" => options.full_screen = flag.unwrap_or(options.full_screen),
+            "shared" => options.shared = flag.unwrap_or(options.shared),
+            "remoteresize" => options.remote_resize = flag.unwrap_or(options.remote_resize),
+            "nojpeg" => options.no_jpeg = flag.unwrap_or(options.no_jpeg),
+            "qualitylevel" if !auto_select => {
+                options.quality = level(&name, value).ok().or(options.quality);
+            }
+            "compresslevel" if !auto_select => {
+                options.compress = level(&name, value).ok().or(options.compress);
+            }
+            "menukey" if !value.is_empty() => value.clone_into(&mut options.menu_key),
+            _ => {}
+        }
+    }
+    options
+}
+
 fn boolean(name: &str, inline: Option<&str>) -> Result<bool, OptionsError> {
     match inline.map(str::to_ascii_lowercase).as_deref() {
         None | Some("1" | "true" | "yes" | "on") => Ok(true),
@@ -191,6 +241,30 @@ fn level(name: &str, value: &str) -> Result<u8, OptionsError> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn tigervnc_settings_become_defaults_and_the_command_line_wins() {
+        let saved = "TigerVNC Configuration file Version 1.0\n\
+                     ServerName=office:1\nAutoSelect=0\nQualityLevel=3\nViewOnly=1\nNoJPEG=0\n\
+                     MenuKey=F9\nCompressLevel=nine\nGarbage\n";
+        let defaults = tigervnc_defaults(saved);
+        assert_eq!(defaults.quality, Some(3));
+        assert!(defaults.view_only);
+        assert_eq!(defaults.menu_key, "F9");
+        assert_eq!(defaults.compress, None, "invalid values are skipped");
+        assert!(defaults.server.is_none(), "never connects by itself");
+        let Ok(Command::Run(o)) =
+            Command::parse_with_defaults(defaults, ["-QualityLevel=7".to_owned()])
+        else {
+            panic!("expected Run");
+        };
+        assert_eq!((o.quality, o.view_only), (Some(7), true));
+        // What TigerVNC saves by default: AutoSelect on, so its levels are ignored.
+        let auto = tigervnc_defaults(
+            "TigerVNC Configuration file Version 1.0\nAutoSelect=1\nQualityLevel=8\nCompressLevel=2\n",
+        );
+        assert_eq!((auto.quality, auto.compress), (None, None));
+    }
     use super::*;
 
     fn parse(args: &[&str]) -> Result<Command, OptionsError> {

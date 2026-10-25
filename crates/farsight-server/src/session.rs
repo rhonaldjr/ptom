@@ -529,6 +529,15 @@ impl ServerSession {
                 };
                 update.reply_to_resize(outcome.status_code());
             }
+            ClientMessage::QemuKeyEvent {
+                down,
+                keysym,
+                keycode,
+            } if !view_only => match farsight_rfb::keycode::xt_to_evdev(keycode) {
+                Some(evdev) => self.ports.input.key_code(down, keysym, evdev),
+                None if keysym != 0 => self.ports.input.key(down, keysym),
+                None => {}
+            },
             ClientMessage::EnableContinuousUpdates { enable, rect } => {
                 update.enable_continuous(enable, rect);
             }

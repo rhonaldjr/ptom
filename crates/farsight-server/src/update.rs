@@ -47,6 +47,8 @@ struct Capabilities {
     desktop_name: bool,
     fence: bool,
     continuous_updates: bool,
+    qemu_keys: bool,
+    led_state: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +78,10 @@ pub(crate) struct UpdateState {
     continuous_ended: bool,
     name_serial: u64,
     name_dirty: bool,
+    /// Confirm QEMU extended key events (a pseudo-rectangle, once).
+    confirm_qemu_keys: bool,
+    led_serial: u64,
+    leds_dirty: bool,
     converter: PixelConverter,
     encoding: Encoding,
     caps: Capabilities,
@@ -113,6 +119,9 @@ impl UpdateState {
             continuous_ended: false,
             name_serial: desktop.name_serial(),
             name_dirty: false,
+            confirm_qemu_keys: false,
+            led_serial: desktop.led_serial(),
+            leds_dirty: false,
             converter: PixelConverter::new(PixelFormat::RGB888),
             encoding: Encoding::Raw,
             caps: Capabilities::default(),
@@ -213,7 +222,15 @@ impl UpdateState {
             desktop_name: list.contains(&Encoding::DesktopName),
             fence: list.contains(&Encoding::Fence),
             continuous_updates: list.contains(&Encoding::ContinuousUpdates),
+            qemu_keys: list.contains(&Encoding::QemuExtendedKeyEvent),
+            led_state: list.contains(&Encoding::LedState),
         };
+        if self.caps.qemu_keys {
+            self.confirm_qemu_keys = true;
+        }
+        if self.caps.led_state {
+            self.leds_dirty = true;
+        }
         // Continuous updates need fences for flow control; announce them
         // (an unprompted EndOfContinuousUpdates) when both are understood.
         let continuous_now = self.caps.continuous_updates && self.caps.fence;
@@ -327,6 +344,10 @@ impl UpdateState {
             self.name_serial = desktop.name_serial();
             self.name_dirty = true;
         }
+        if desktop.led_serial() != self.led_serial {
+            self.led_serial = desktop.led_serial();
+            self.leds_dirty = true;
+        }
     }
 
     fn can_resize(&self) -> bool {
@@ -373,6 +394,8 @@ impl UpdateState {
             || (self.announce_layout && self.caps.extended_desktop_size)
             || (self.cursor_dirty && self.sends_cursor())
             || (self.name_dirty && self.caps.desktop_name)
+            || self.confirm_qemu_keys
+            || (self.leds_dirty && self.caps.led_state && desktop.leds().is_some())
             || damage::intersect(request.area, self.bounds(desktop))
                 .is_some_and(|area| !self.damage.within(area).is_empty())
     }
@@ -490,6 +513,28 @@ impl UpdateState {
         if self.cursor_dirty && self.sends_cursor() {
             self.cursor_dirty = false;
             rects.push(self.cursor_rect(desktop.cursor()));
+        }
+        if std::mem::take(&mut self.confirm_qemu_keys) {
+            rects.push((
+                RectHeader {
+                    rect: Rect::default(),
+                    encoding: Encoding::QemuExtendedKeyEvent,
+                },
+                Vec::new(),
+            ));
+        }
+        if self.leds_dirty
+            && self.caps.led_state
+            && let Some(leds) = desktop.leds()
+        {
+            self.leds_dirty = false;
+            rects.push((
+                RectHeader {
+                    rect: Rect::default(),
+                    encoding: Encoding::LedState,
+                },
+                vec![leds],
+            ));
         }
         if std::mem::take(&mut self.name_dirty) && self.caps.desktop_name {
             rects.push((

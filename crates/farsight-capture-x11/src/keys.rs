@@ -82,6 +82,16 @@ impl Keymap {
         }
     }
 
+    /// Whether the X server numbers keys like Linux (keycode = evdev + 8),
+    /// as the evdev/libinput keymaps do; `xfree86` keycodes differ. Checked
+    /// on keys whose meaning doesn't depend on the layout.
+    pub(crate) fn uses_evdev_keycodes(&self) -> bool {
+        const ESCAPE: u32 = 0xff1b;
+        const BACKSPACE: u32 = 0xff08;
+        const UP: u32 = 0xff52;
+        self.raw(9, 0) == ESCAPE && self.raw(22, 0) == BACKSPACE && self.raw(111, 0) == UP
+    }
+
     fn keycodes(&self) -> impl Iterator<Item = u8> + '_ {
         let count = self.syms.len().checked_div(self.per_keycode).unwrap_or(0);
         (0..count).map_while(|i| self.min_keycode.checked_add(u8::try_from(i).ok()?))

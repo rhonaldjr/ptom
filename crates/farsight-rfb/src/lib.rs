@@ -16,6 +16,7 @@ mod connection;
 pub mod encoding;
 mod error;
 pub mod handshake;
+pub mod keycode;
 pub mod limits;
 pub mod messages;
 pub mod pixel_format;

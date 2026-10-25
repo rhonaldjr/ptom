@@ -19,7 +19,7 @@ dependencies. Milestones are scope, not dates.
 | M6 Multi-session viewer, tray, advertising | ✅ Done (hand check pending) |
 | M7 Persistent headless desktops | ✅ Done |
 | M8 Performance and full encodings | ✅ Done |
-| M9 Compatibility and polish | ⬜ Not started |
+| M9 Compatibility and polish | ✅ Done (hand checks pending) |
 | M10 GPU paths and H.264 | ⬜ Not started |
 
 Each item below is a checkbox: ticked means built, tested and committed.
@@ -123,12 +123,18 @@ ENC-3, ENC-4, ENC-6, ENC-7, ENC-9, ENC-10, ENC-11, NET-7, SRV-6, PLT-4
 - [x] **Conditions:** `criterion` benchmarks, [published baselines](../performance/baselines.md), benchmarks attached to every release ✓ ·
   zlib-bomb limits (bounded inflate since M2, fuzzed) ✓
 
-## M9: Compatibility and polish ⬜ Not started · [council](../council/2026-10-23-initial-roadmap.md#m9-compatibility--polish)
+## M9: Compatibility and polish ✅ Done · [council](../council/2026-10-23-initial-roadmap.md#m9-compatibility--polish) · [matrix](../testing/compatibility-matrix.md)
 PLT-3, INP-3, INP-4, VWR-7, VWR-11, UTL-2, UTL-3, UTL-4
-- [ ] Interop matrix in CI: TigerVNC, TightVNC, RealVNC (viewer side), and noVNC
-- [ ] Compat names (`vncviewer`, `vncserver`, `x0vncserver`, `w0vncserver`, `vncpasswd`), installed as **opt-in** symlinks
-- [ ] System-key capture per DE · LED sync · QEMU key events · runtime config reload · reading legacy `~/.vnc` config
-- [ ] KDE and Xfce certification rows · macOS viewer polish
+- [x] Interop matrix in CI: TigerVNC 1.12/1.15 and TightVNC servers, and TigerVNC's viewer against the agent.
+  RealVNC (proprietary) and noVNC (needs the web gateway) are hand checks / later (P-48)
+- [x] Compat names (`vncviewer`, `vncserver`, `x0vncserver`, `w0vncserver`, `vncpasswd`) in the **opt-in**
+  `farsight-tigervnc-compat` package, accepting TigerVNC's options (U-11, P-47)
+- [x] QEMU key events (physical keys, any layout) · LED sync (remote Caps/Num Lock shown) · runtime config reload
+  (`systemctl --user reload`) · reading TigerVNC's viewer and `vncserver` settings
+- [x] System keys: the F8 menu sends Ctrl+Alt+Del, Super, Alt+Tab, Alt+F4 and Print Screen (a full keyboard grab
+  needs toolkit support; P-49)
+- [x] KDE and Xfce certification rows and the macOS checklist in the [compatibility matrix](../testing/compatibility-matrix.md)
+- ⚠️ The hand checks in the matrix (KDE, Xfce, COSMIC live, macOS) are still to be done by a person.
 
 ## M10: GPU paths and H.264 ⬜ Not started · [council](../council/2026-10-23-initial-roadmap.md#m10-gpu--h264)
 SRV-11, ENC-8

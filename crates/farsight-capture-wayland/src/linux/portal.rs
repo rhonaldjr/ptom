@@ -5,9 +5,9 @@ use std::os::fd::OwnedFd;
 use std::sync::Arc;
 
 use ashpd::desktop::remote_desktop::{
-    Axis, DeviceType, KeyState, NotifyKeyboardKeysymOptions, NotifyPointerAxisDiscreteOptions,
-    NotifyPointerButtonOptions, NotifyPointerMotionAbsoluteOptions, RemoteDesktop,
-    SelectDevicesOptions, StartOptions,
+    Axis, DeviceType, KeyState, NotifyKeyboardKeycodeOptions, NotifyKeyboardKeysymOptions,
+    NotifyPointerAxisDiscreteOptions, NotifyPointerButtonOptions,
+    NotifyPointerMotionAbsoluteOptions, RemoteDesktop, SelectDevicesOptions, StartOptions,
 };
 use ashpd::desktop::screencast::{
     CursorMode, OpenPipeWireRemoteOptions, Screencast, SelectSourcesOptions, SourceType,
@@ -194,6 +194,10 @@ struct Injector {
     frame_size: Arc<FrameSize>,
     buttons: u8,
     position: Option<(u16, u16)>,
+    /// Keys pressed and not released yet, so they can be let go when a
+    /// viewer disappears (else they stay held on the user's own desktop).
+    held_keysyms: std::collections::HashSet<i32>,
+    held_codes: std::collections::HashSet<u16>,
 }
 
 impl Injector {
@@ -203,6 +207,11 @@ impl Injector {
                 let Ok(keysym) = i32::try_from(keysym) else {
                     return Ok(());
                 };
+                if down {
+                    self.held_keysyms.insert(keysym);
+                } else {
+                    self.held_keysyms.remove(&keysym);
+                }
                 let state = if down {
                     KeyState::Pressed
                 } else {
@@ -217,6 +226,56 @@ impl Injector {
                         NotifyKeyboardKeysymOptions::default(),
                     )
                     .await
+            }
+            InputEvent::KeyCode { down, evdev } => {
+                if down {
+                    self.held_codes.insert(evdev);
+                } else {
+                    self.held_codes.remove(&evdev);
+                }
+                let state = if down {
+                    KeyState::Pressed
+                } else {
+                    KeyState::Released
+                };
+                portal
+                    .remote
+                    .notify_keyboard_keycode(
+                        &portal.session,
+                        i32::from(evdev),
+                        state,
+                        NotifyKeyboardKeycodeOptions::default(),
+                    )
+                    .await
+            }
+            InputEvent::ReleaseAll => {
+                for keysym in std::mem::take(&mut self.held_keysyms) {
+                    portal
+                        .remote
+                        .notify_keyboard_keysym(
+                            &portal.session,
+                            keysym,
+                            KeyState::Released,
+                            NotifyKeyboardKeysymOptions::default(),
+                        )
+                        .await?;
+                }
+                for evdev in std::mem::take(&mut self.held_codes) {
+                    portal
+                        .remote
+                        .notify_keyboard_keycode(
+                            &portal.session,
+                            i32::from(evdev),
+                            KeyState::Released,
+                            NotifyKeyboardKeycodeOptions::default(),
+                        )
+                        .await?;
+                }
+                let previous = std::mem::take(&mut self.buttons);
+                for action in pointer::actions(previous, 0) {
+                    Self::act(portal, action).await?;
+                }
+                Ok(())
             }
             InputEvent::Pointer { buttons, x, y } => {
                 if self.position != Some((x, y)) {
@@ -325,6 +384,8 @@ impl Supervisor {
             frame_size,
             buttons: 0,
             position: None,
+            held_keysyms: std::collections::HashSet::new(),
+            held_codes: std::collections::HashSet::new(),
         };
         let session_closed = async {
             match portal.session.receive_closed().await {

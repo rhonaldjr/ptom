@@ -17,3 +17,4 @@
 | [security/threat-model.md](security/threat-model.md) | Threat model and accepted risks |
 | [testing/](testing/README.md) | Test strategy and exploratory charters |
 | [performance/baselines.md](performance/baselines.md) | Benchmarks and performance baselines (M8) |
+| [testing/compatibility-matrix.md](testing/compatibility-matrix.md) | What is tested against which VNC software and desktops (M9) |

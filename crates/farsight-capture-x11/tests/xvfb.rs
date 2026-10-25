@@ -560,3 +560,37 @@ async fn randr_resize_sends_full_frame() {
     assert!(frame.damage.is_none(), "a resize sends a full frame");
     assert_eq!(frame.framebuffer.pixels().len(), 640 * 480);
 }
+
+/// M9: physical keys (QEMU key events) press X keycode evdev + 8 on Xvfb's
+/// evdev keymap, and `release_all` lets go of anything a viewer left held.
+#[tokio::test]
+async fn physical_keys_are_pressed_and_released_when_a_viewer_leaves() {
+    let Some(xvfb) = Xvfb::start() else { return };
+    let started = xvfb.start_backend();
+    let (conn, root) = xvfb.connect();
+    let window = input_window(&conn, root);
+    conn.set_input_focus(InputFocus::POINTER_ROOT, window, CURRENT_TIME)
+        .unwrap();
+    conn.flush().unwrap();
+    let input = started.input.clone();
+    let ctrl_l = keycode_of(&conn, 0xffe3).expect("Control_L is mapped");
+
+    // Left Ctrl is evdev 29; the viewer never sends the release.
+    input.key_code(true, 0xffe3, 29);
+    let event = wait_x_event(&conn, |e| matches!(e, Event::KeyPress(_)));
+    assert!(
+        matches!(event, Event::KeyPress(p) if p.detail == ctrl_l),
+        "{event:?}"
+    );
+    let held = conn.query_pointer(root).unwrap().reply().unwrap().mask;
+    assert_ne!(u16::from(held) & u16::from(KeyButMask::CONTROL), 0);
+
+    input.release_all();
+    wait_x_event(
+        &conn,
+        |e| matches!(e, Event::KeyRelease(r) if r.detail == ctrl_l),
+    );
+    let released = conn.query_pointer(root).unwrap().reply().unwrap().mask;
+    assert_eq!(u16::from(released) & u16::from(KeyButMask::CONTROL), 0);
+    drop(started);
+}

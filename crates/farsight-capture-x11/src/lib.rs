@@ -148,6 +148,8 @@ impl CaptureError {
 #[derive(Debug, Clone, Copy)]
 enum InputCommand {
     Key { down: bool, keysym: u32 },
+    KeyCode { down: bool, keysym: u32, evdev: u16 },
+    ReleaseAll,
     Pointer { buttons: u8, x: u16, y: u16 },
 }
 
@@ -163,6 +165,22 @@ impl InputHandle {
     /// Presses (`down`) or releases a key given as an X keysym.
     pub fn key(&self, down: bool, keysym: u32) {
         self.send(InputCommand::Key { down, keysym });
+    }
+
+    /// Presses or releases a physical key (Linux evdev code; X keycodes are
+    /// evdev + 8 with the standard keymaps), whatever the layout produces.
+    /// Releases every key and button a viewer left pressed.
+    pub fn release_all(&self) {
+        self.send(InputCommand::ReleaseAll);
+    }
+
+    /// Falls back to `keysym` when the server's keycodes aren't evdev-based.
+    pub fn key_code(&self, down: bool, keysym: u32, evdev: u16) {
+        self.send(InputCommand::KeyCode {
+            down,
+            keysym,
+            evdev,
+        });
     }
 
     /// Moves the pointer to (`x`, `y`) and sets the buttons to the RFB mask

@@ -3,9 +3,11 @@
 
 mod advertise;
 mod capture;
+mod compat;
 mod identity;
 mod options;
 mod runtime;
+mod vncserver;
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::process::ExitCode;
@@ -29,7 +31,58 @@ fn main() -> ExitCode {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
-    let options = match Command::parse(std::env::args().skip(1)) {
+    // Before anything else, for every personality (ADR-0009): as root, even
+    // `vncserver` would write files in a user-controlled directory.
+    if rustix::process::geteuid().is_root() {
+        eprintln!("farsight-agent must not run as root; run it as the desktop user (ADR-0009)");
+        return ExitCode::FAILURE;
+    }
+    let args: Vec<String> = std::env::args().collect();
+    let program = args.first().cloned().unwrap_or_default();
+    let rest = args.get(1..).unwrap_or_default();
+    let options = match compat::Personality::from_program(&program) {
+        compat::Personality::Farsight => Command::parse(rest.iter().cloned()),
+        compat::Personality::Vncserver => {
+            let defaults = compat::vncserver_config(&vncserver::config_file());
+            let mandatory = compat::mandatory_listen(&vncserver::mandatory_config_file());
+            let command = compat::vncserver_options(rest, defaults).map(|command| {
+                match (command, mandatory) {
+                    // The administrator's `localhost` wins (TigerVNC's mandatory config).
+                    (
+                        compat::VncserverCommand::Start {
+                            display, geometry, ..
+                        },
+                        Some(listen),
+                    ) => compat::VncserverCommand::Start {
+                        display,
+                        geometry,
+                        listen,
+                    },
+                    (command, _) => command,
+                }
+            });
+            return match command.map(vncserver::run) {
+                Ok(Ok(())) => ExitCode::SUCCESS,
+                Ok(Err(error)) => {
+                    eprintln!("vncserver: {error:#}");
+                    ExitCode::FAILURE
+                }
+                Err(error) => {
+                    eprintln!("vncserver: {error}\n{}", vncserver::USAGE);
+                    ExitCode::from(2)
+                }
+            };
+        }
+        personality => match compat::scraping_options(personality, rest) {
+            Ok(compat::ScrapingCommand::Run(mut options, display)) => {
+                options.x11_display = display;
+                Ok(Command::Run(options))
+            }
+            Ok(compat::ScrapingCommand::Help) => Ok(Command::Help),
+            Err(error) => Err(error),
+        },
+    };
+    let options = match options {
         Ok(Command::Run(options)) => options,
         Ok(Command::Help) => {
             print!("{USAGE}");
@@ -77,6 +130,9 @@ async fn run(
     if rustix::process::geteuid().is_root() {
         bail!("farsight-agent must not run as root; run it as the desktop user (ADR-0009)");
     }
+    // Catch SIGHUP from the start: a `systemctl --user reload` while we are
+    // still starting must not kill us (its default action).
+    let mut hangup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
     if let Some(trust) = options.change_trust {
         return advertise::change_trust(&Identity::default_dir()?, trust);
     }
@@ -86,19 +142,12 @@ async fn run(
         return show_identity(&identity);
     }
 
-    let credentials = AgentCredentials::load(AgentCredentials::default_path()?)
-        .context("reading agent credentials")?;
-    let vnc_password = match credentials.vncauth_password(&KeyringKeySource::agent()) {
-        Ok(password) => password,
-        Err(error) => {
-            warn!(%error, "the legacy VncAuth password is unavailable");
-            None
-        }
-    };
+    let logins = load_logins_blocking(KeyringFailure::Continue).await?;
     // A socket handed over by systemd (socket activation) decides where we listen.
     let (listener, listen) = open_listener(passed, options.listen, options.port).await?;
     let port = listener.local_addr()?.port();
-    let has_users = credentials.usernames().next().is_some();
+    let has_users = logins.verifier.is_some();
+    let vnc_password = logins.vnc_password.clone();
     // A headless desktop has nobody at the screen to approve logins, so it
     // always needs a password, even on loopback (like vncserver).
     if options.backend == options::Backend::Headless && !has_users && vnc_password.is_none() {
@@ -115,8 +164,6 @@ async fn run(
             owner().unwrap_or_else(|| "<your-user>".into())
         );
     }
-    let verifier: Option<Arc<dyn UserVerifier>> =
-        has_users.then(|| Arc::new(CredentialsVerifier(credentials)) as Arc<dyn UserVerifier>);
 
     let backend = options.backend.resolve(
         std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
@@ -138,8 +185,7 @@ async fn run(
         owner: owner(),
         tls: farsight_net::tls_acceptor(&identity.cert_pem, &identity.key_pem)?,
         ra2: Arc::clone(&identity.ra2),
-        verifier,
-        vnc_password,
+        logins,
         allow_legacy: options.allow_legacy,
         view_only: options.view_only,
         headless,
@@ -165,6 +211,20 @@ async fn run(
     let compositor = capture.compositor.take();
     let input = capture.input.clone();
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    // `systemctl --user reload` (SIGHUP): re-read passwords (M9).
+    tokio::spawn({
+        let agent = Arc::clone(&agent);
+        async move {
+            while hangup.recv().await.is_some() {
+                match load_logins_blocking(KeyringFailure::Abort).await {
+                    Ok(logins) => agent.reload_logins(logins),
+                    Err(error) => {
+                        warn!(error = %format!("{error:#}"), "could not reload passwords");
+                    }
+                }
+            }
+        }
+    });
     let pump = tokio::spawn(Arc::clone(&agent).pump(capture));
     let result = tokio::select! {
         result = Arc::clone(&agent).listen(listener) => result,
@@ -174,6 +234,49 @@ async fn run(
     };
     capture::shutdown(&input, compositor).await;
     result
+}
+
+/// [`load_logins`] off the async workers: the OS keyring client blocks (and
+/// starts its own runtime), which must not happen on a runtime thread.
+async fn load_logins_blocking(keyring: KeyringFailure) -> Result<runtime::Logins> {
+    tokio::task::spawn_blocking(move || load_logins(keyring))
+        .await
+        .context("loading passwords")?
+}
+
+/// What an unreadable OS keyring means for the VNC password.
+#[derive(Clone, Copy)]
+enum KeyringFailure {
+    /// At startup: carry on without it (warn).
+    Continue,
+    /// On reload: abort, keeping the current logins (fail closed: never
+    /// drop a password just because the keyring is locked right now).
+    Abort,
+}
+
+/// Reads who may log in: agent users (Argon2id) and the legacy VNC password.
+fn load_logins(keyring: KeyringFailure) -> Result<runtime::Logins> {
+    let credentials = AgentCredentials::load(AgentCredentials::default_path()?)
+        .context("reading agent credentials")?;
+    let vnc_password = match credentials.vncauth_password(&KeyringKeySource::agent()) {
+        Ok(password) => password,
+        Err(error) => match keyring {
+            KeyringFailure::Continue => {
+                warn!(%error, "the legacy VncAuth password is unavailable");
+                None
+            }
+            KeyringFailure::Abort => {
+                return Err(error).context("the OS keyring can't be read right now");
+            }
+        },
+    };
+    let has_users = credentials.usernames().next().is_some();
+    let verifier =
+        has_users.then(|| Arc::new(CredentialsVerifier(credentials)) as Arc<dyn UserVerifier>);
+    Ok(runtime::Logins {
+        verifier,
+        vnc_password,
+    })
 }
 
 /// The listening socket: the one systemd passed (socket activation, M7) or
@@ -217,6 +320,7 @@ fn headless_setup(
         .display
         .or_else(|| (headless && (5901..=5999).contains(&port)).then(|| u32::from(port - 5900)));
     Ok(capture::HeadlessSetup {
+        x11_display: options.x11_display.clone(),
         session_umask: None,
         width: options.geometry.0,
         height: options.geometry.1,

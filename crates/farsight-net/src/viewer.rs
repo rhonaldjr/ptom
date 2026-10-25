@@ -25,6 +25,16 @@ pub enum Command {
         /// X11 keysym.
         keysym: u32,
     },
+    /// Key press/release with its physical position (Linux evdev code):
+    /// sent as a QEMU extended key event when the server supports them.
+    PhysicalKey {
+        /// Pressed or released.
+        down: bool,
+        /// X11 keysym from the local layout.
+        keysym: u32,
+        /// Linux evdev code.
+        evdev: u16,
+    },
     /// Pointer state in framebuffer coordinates.
     Pointer {
         /// Button mask.
@@ -274,6 +284,11 @@ fn apply(
 ) -> Result<Option<Vec<SessionEvent>>, farsight_rfb::ProtocolError> {
     match command {
         Command::Key { down, keysym } => session.key(down, keysym),
+        Command::PhysicalKey {
+            down,
+            keysym,
+            evdev,
+        } => session.key_with_code(down, keysym, evdev),
         Command::Pointer { buttons, x, y } => session.pointer(buttons, x, y),
         Command::Clipboard(text) => session.clipboard(&text),
         Command::SetViewOnly(view_only) => session.set_view_only(view_only),

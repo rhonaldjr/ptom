@@ -42,6 +42,8 @@ pub(crate) struct Injector {
     keymap: Keymap,
     modifiers: ModifierKeys,
     held: HashMap<u32, HeldKey>,
+    /// Physical keys pressed by code (QEMU key events).
+    held_codes: std::collections::HashSet<u8>,
     buttons: u8,
 }
 
@@ -71,6 +73,7 @@ impl Injector {
             keymap: Keymap::default(),
             modifiers: ModifierKeys::default(),
             held: HashMap::new(),
+            held_codes: std::collections::HashSet::new(),
             buttons: 0,
         };
         injector.load_mapping()?;
@@ -103,6 +106,20 @@ impl Injector {
                 down: false,
                 keysym,
             } => self.key_up(keysym)?,
+            InputCommand::KeyCode {
+                down,
+                keysym,
+                evdev,
+            } => {
+                if self.keymap.uses_evdev_keycodes() {
+                    self.key_code(down, evdev)?;
+                } else if down {
+                    self.key_down(keysym)?;
+                } else {
+                    self.key_up(keysym)?;
+                }
+            }
+            InputCommand::ReleaseAll => self.release_all()?,
             InputCommand::Pointer { buttons, x, y } => self.pointer(buttons, x, y)?,
         }
         self.conn.flush()?;
@@ -158,6 +175,20 @@ impl Injector {
         self.conn
             .xtest_fake_input(kind, detail, CURRENT_TIME, NONE, 0, 0, 0)?;
         Ok(())
+    }
+
+    fn key_code(&mut self, down: bool, evdev: u16) -> Result<(), CaptureError> {
+        let Some(keycode) = evdev.checked_add(8).and_then(|k| u8::try_from(k).ok()) else {
+            return Ok(());
+        };
+        if down {
+            self.held_codes.insert(keycode);
+            self.fake(KEY_PRESS_EVENT, keycode)
+        } else if self.held_codes.remove(&keycode) {
+            self.fake(KEY_RELEASE_EVENT, keycode)
+        } else {
+            Ok(())
+        }
     }
 
     fn key_down(&mut self, keysym: u32) -> Result<(), CaptureError> {
@@ -328,6 +359,9 @@ impl Injector {
         let keysyms: Vec<u32> = self.held.keys().copied().collect();
         for keysym in keysyms {
             self.key_up(keysym)?;
+        }
+        for keycode in std::mem::take(&mut self.held_codes) {
+            self.fake(KEY_RELEASE_EVENT, keycode)?;
         }
         for change in button_changes(self.buttons, 0) {
             if let ButtonChange::Release(button) = change {

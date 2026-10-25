@@ -48,6 +48,10 @@ integrity · viewer host integrity · the local user's awareness that they are b
 | Silent co-viewing of a headless desktop | Red frame inside the desktop whenever 2+ viewers are connected; presence tray and notifications on the user's main desktop (P-40) | M7 ✅ |
 | Resize abuse (huge or many screens → memory exhaustion) | Layout validated: ≤ 16 screens, ≤ 8192 px a side, ≤ 33.5 MP, in bounds, no overlaps; only the controller may resize; one resize per 250 ms; frames not rendered or copied while the agent is behind | M7 ✅ |
 | Apps in the session exhausting the compositor (clipboard transfers that never finish) | At most 8 transfers at once; thread-spawn failure is handled, never a panic | M7 ✅ |
+| Compat names weaken defaults (scripts pass TigerVNC options) | x0vncserver/w0vncserver keep loopback and Farsight's security choice; `-interface` never widens (a specific address is refused); `-PasswordFile` and `vncpasswd -f` refused; TigerVNC's mandatory `localhost` honoured (P-47) | M9 ✅ |
+| `vncserver -kill` signals the wrong process (stale pidfile, pid reuse) | Pidfiles in a checked 0700 runtime dir, created exclusively without following symlinks; the process must be this executable serving that display ([M9 review](../reviews/2026-10-24-m9-review.md)) | M9 ✅ |
+| Keys left held on the owner's session when a viewer drops (live desktops) | Every backend releases held keys and buttons when a viewer disconnects | M9 ✅ |
+| Root runs a compat name with a user's environment | Every personality refuses to run as root, first (ADR-0009) | M9 ✅ |
 | Supply-chain compromise | cargo-deny · provenance attestations · SHA-pinned actions | M0 |
 
 ## Accepted risks

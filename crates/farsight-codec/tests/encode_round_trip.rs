@@ -379,3 +379,15 @@ fn rre_refuses_heavily_overlapping_subrects() {
     }
     assert!(d.decode_rect(&header, &payload).is_err());
 }
+
+#[test]
+fn led_state_waits_for_its_byte() {
+    let mut d = Decoder::new(4, 4, PixelFormat::RGB888, Limits::DEFAULT);
+    let header = RectHeader {
+        rect: Rect::new(0, 0, 0, 0),
+        encoding: Encoding::LedState,
+    };
+    assert_eq!(d.decode_rect(&header, &[]), Ok(None));
+    assert_eq!(d.decode_rect(&header, &[0b100]), Ok(Some(1)));
+    assert_eq!(d.take_leds(), Some(0b100));
+}

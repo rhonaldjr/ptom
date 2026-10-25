@@ -442,6 +442,7 @@ impl State {
     fn handle(&mut self, command: Command) {
         match command {
             Command::Key { down, keysym } => self.key(down, keysym),
+            Command::KeyCode { down, evdev } => self.key_code(down, evdev),
             Command::Pointer { buttons, x, y } => self.pointer(buttons, x, y),
             Command::Clipboard(text) => clipboard::set_from_viewer(self, text),
             Command::ReleaseAll => self.release_all(),
@@ -503,6 +504,26 @@ impl State {
         for (window, at) in moves {
             self.move_window(&window, at);
         }
+    }
+
+    fn key_code(&mut self, down: bool, evdev: u16) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        let state = if down {
+            KeyState::Pressed
+        } else {
+            KeyState::Released
+        };
+        let time = self.time();
+        keyboard.input::<(), _>(
+            self,
+            Keycode::new(u32::from(evdev) + 8),
+            state,
+            SERIAL_COUNTER.next_serial(),
+            time,
+            |_, _, _| FilterResult::Forward,
+        );
     }
 
     /// Lets go of every key and pointer button currently held.

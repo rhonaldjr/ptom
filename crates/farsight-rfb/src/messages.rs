@@ -20,6 +20,7 @@ mod client_type {
     pub const ENABLE_CONTINUOUS_UPDATES: u8 = 150;
     pub const FENCE: u8 = 248;
     pub const SET_DESKTOP_SIZE: u8 = 251;
+    pub const QEMU: u8 = 255;
 }
 
 /// Server-to-client message type codes.
@@ -31,6 +32,9 @@ mod server_type {
     pub const END_OF_CONTINUOUS_UPDATES: u8 = 150;
     pub const FENCE: u8 = 248;
 }
+
+/// QEMU client message subtype for extended key events.
+const QEMU_KEY_EVENT: u8 = 0;
 
 /// Most bytes a fence may carry (rfbproto "Fence").
 pub const MAX_FENCE_PAYLOAD: usize = 64;
@@ -136,6 +140,17 @@ pub enum ClientMessage {
         /// Opaque bytes echoed back in the reply (at most 64).
         payload: Vec<u8>,
     },
+    /// A key identified by its physical position as well as its keysym
+    /// (QEMU extended key event; needs the `QemuExtendedKeyEvent`
+    /// pseudo-encoding, confirmed by the server).
+    QemuKeyEvent {
+        /// Pressed or released.
+        down: bool,
+        /// The keysym the viewer's layout produced (may be 0).
+        keysym: u32,
+        /// XT scancode, see [`crate::keycode`].
+        keycode: u32,
+    },
 }
 
 impl ClientMessage {
@@ -217,6 +232,17 @@ impl ClientMessage {
                 out.put_u8(client_type::FENCE);
                 put_fence(out, *flags, payload)?;
             }
+            Self::QemuKeyEvent {
+                down,
+                keysym,
+                keycode,
+            } => {
+                out.put_u8(client_type::QEMU);
+                out.put_u8(QEMU_KEY_EVENT);
+                out.put_u16(u16::from(*down));
+                out.put_u32(*keysym);
+                out.put_u32(*keycode);
+            }
         }
         Ok(())
     }
@@ -297,6 +323,14 @@ impl ClientMessage {
                 let (flags, payload) = read_fence(&mut r)?;
                 Self::Fence { flags, payload }
             }
+            client_type::QEMU => match r.u8()? {
+                QEMU_KEY_EVENT => Self::QemuKeyEvent {
+                    down: r.u16()? != 0,
+                    keysym: r.u32()?,
+                    keycode: r.u32()?,
+                },
+                _ => return Err(DecodeError::Malformed("unknown QEMU message subtype")),
+            },
             other => return Err(DecodeError::UnknownMessageType(other)),
         };
         Ok((message, r.consumed()))
@@ -529,6 +563,39 @@ fn read_cut_text(r: &mut Reader<'_>, limits: &Limits) -> Result<CutText, DecodeE
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn qemu_key_events_round_trip_and_reject_other_subtypes() {
+        let event = ClientMessage::QemuKeyEvent {
+            down: true,
+            keysym: 0x61,
+            keycode: 0x1e,
+        };
+        let mut wire = Vec::new();
+        event.encode(&mut wire).unwrap();
+        assert_eq!(wire.len(), 12);
+        assert_eq!(
+            ClientMessage::decode(&wire, &Limits::DEFAULT),
+            Ok((event, 12))
+        );
+        for cut in 0..wire.len() {
+            assert!(
+                ClientMessage::decode(&wire[..cut], &Limits::DEFAULT)
+                    .is_err_and(|e| e.is_incomplete())
+            );
+        }
+        // "down" values other than 0 mean pressed.
+        wire[3] = 2;
+        assert!(matches!(
+            ClientMessage::decode(&wire, &Limits::DEFAULT),
+            Ok((ClientMessage::QemuKeyEvent { down: true, .. }, 12))
+        ));
+        wire[1] = 1;
+        assert!(
+            ClientMessage::decode(&wire, &Limits::DEFAULT).is_err(),
+            "audio subtype"
+        );
+    }
     use super::*;
     use proptest::prelude::*;
 

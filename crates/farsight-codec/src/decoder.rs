@@ -27,6 +27,8 @@ pub struct Decoder {
     last_resize: Option<DesktopResize>,
     /// A new desktop name, until taken with [`Self::take_name`].
     name: Option<String>,
+    /// Keyboard LEDs the server last reported, until taken.
+    leds: Option<u8>,
 }
 
 impl Decoder {
@@ -45,7 +47,14 @@ impl Decoder {
             extended_resize: false,
             last_resize: None,
             name: None,
+            leds: None,
         }
+    }
+
+    /// The keyboard LEDs (bit 0 Scroll, 1 Num, 2 Caps Lock) the server last
+    /// reported, once.
+    pub fn take_leds(&mut self) -> Option<u8> {
+        self.leds.take()
     }
 
     /// The desktop name the server last announced, once.
@@ -207,6 +216,13 @@ impl RectDecoder for Decoder {
                 crate::rre::decode(&mut self.framebuffer, &self.converter, rect, input)
             }
             Encoding::DesktopName => self.desktop_name(input),
+            // The server confirms QEMU key events; no payload.
+            Encoding::QemuExtendedKeyEvent => Ok(Some(0)),
+            Encoding::LedState => {
+                let mut r = Reader::new(input);
+                self.leds = Some(need!(r.u8()));
+                Ok(Some(1))
+            }
             Encoding::Hextile => {
                 hextile::decode(&mut self.framebuffer, &self.converter, rect, input)
             }
