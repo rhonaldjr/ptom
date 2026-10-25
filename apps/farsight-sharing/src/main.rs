@@ -24,7 +24,9 @@ fn main() -> ExitCode {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
         )
         .init();
-    let settings = AppSettings::default().size(Size::new(640.0, 760.0));
+    let settings = AppSettings::default()
+        .size(Size::new(640.0, 760.0))
+        .default_icon_theme(farsight_desktop::icon_theme::for_libcosmic().unwrap_or_default());
     match cosmic::app::run::<App>(settings, ()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -161,13 +163,24 @@ impl cosmic::Application for App {
             .width(Length::Fill)
             .push(widget::text::title3("Share this computer"))
             .push(widget::settings::item(
-                if s.sharing {
-                    "Sharing is on: others can connect with a password"
-                } else {
-                    "Sharing is off"
+                match (s.sharing, &s.problem) {
+                    (true, None) => "Sharing is on: others can connect with a password",
+                    (true, Some(_)) => "Sharing is on, but it isn't working",
+                    (false, _) => "Sharing is off",
                 },
                 widget::toggler(s.sharing).on_toggle(Message::Sharing),
             ));
+        if let Some(problem) = &s.problem {
+            page = page.push(
+                widget::Column::new()
+                    .spacing(4)
+                    .push(widget::text::heading("⚠ The sharing agent keeps stopping"))
+                    .push(widget::text::body(problem.clone()))
+                    .push(widget::text::caption(
+                        "Full log: journalctl --user -u farsight-agent",
+                    )),
+            );
+        }
         page = page.push(self.reach_section()).push(self.network_section());
         page = page.push(self.password_section());
         page = page.push(self.address_section());

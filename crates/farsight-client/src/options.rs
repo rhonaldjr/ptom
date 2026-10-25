@@ -52,6 +52,8 @@ pub struct ViewerOptions {
     pub menu_key: String,
     /// Resize the remote desktop to fit the window.
     pub remote_resize: bool,
+    /// Ask the server for this desktop size on connecting (`-DesktopSize`).
+    pub desktop_size: Option<(u16, u16)>,
 }
 
 impl Default for ViewerOptions {
@@ -69,6 +71,7 @@ impl Default for ViewerOptions {
             password_file: None,
             menu_key: "F8".into(),
             remote_resize: true,
+            desktop_size: None,
         }
     }
 }
@@ -114,6 +117,8 @@ Options (TigerVNC-compatible; case-insensitive; -Name value or -Name=value):
   -PasswordFile FILE    Read the password from a vncpasswd file (alias -passwd)
   -MenuKey KEY          Key that opens the viewer menu (default F8)
   -RemoteResize=0       Don't resize the remote desktop to fit the window
+  -DesktopSize=WxH      Ask the server for this desktop size (e.g. 2560x1440);
+                        the F8 menu changes it while connected
   -AllowInsecure        Connect without encryption without asking
   -help, --version
 ";
@@ -172,6 +177,13 @@ impl Command {
                     options.password_file = Some(PathBuf::from(value(&name, inline, &mut args)?));
                 }
                 "menukey" => options.menu_key = value(&name, inline, &mut args)?,
+                "desktopsize" => {
+                    let text = value(&name, inline, &mut args)?;
+                    options.desktop_size = Some(size(&text).ok_or(OptionsError::InvalidValue {
+                        option: name.clone(),
+                        value: text,
+                    })?);
+                }
                 _ => return Err(OptionsError::Unknown(name)),
             }
         }
@@ -221,10 +233,23 @@ pub fn tigervnc_defaults(text: &str) -> ViewerOptions {
                 options.compress = level(&name, value).ok().or(options.compress);
             }
             "menukey" if !value.is_empty() => value.clone_into(&mut options.menu_key),
+            "desktopsize" => options.desktop_size = size(value).or(options.desktop_size),
             _ => {}
         }
     }
     options
+}
+
+/// `WxH`, each side 1–16384.
+fn size(text: &str) -> Option<(u16, u16)> {
+    let (w, h) = text.trim().split_once(['x', 'X'])?;
+    let side = |s: &str| {
+        s.trim()
+            .parse::<u16>()
+            .ok()
+            .filter(|n| (1..=16_384).contains(n))
+    };
+    Some((side(w)?, side(h)?))
 }
 
 fn boolean(name: &str, inline: Option<&str>) -> Result<bool, OptionsError> {
@@ -250,6 +275,20 @@ fn level(name: &str, value: &str) -> Result<u8, OptionsError> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn desktop_size_is_parsed_and_checked() {
+        let Ok(Command::Run(o)) = parse(&["-DesktopSize=2560x1440"]) else {
+            panic!("expected Run");
+        };
+        assert_eq!(o.desktop_size, Some((2560, 1440)));
+        assert!(parse(&["-DesktopSize", "big"]).is_err());
+        assert!(parse(&["-DesktopSize=0x10"]).is_err());
+        assert_eq!(
+            tigervnc_defaults("DesktopSize=3840x2160\n").desktop_size,
+            Some((3840, 2160))
+        );
+    }
 
     #[test]
     fn tigervnc_settings_become_defaults_and_the_command_line_wins() {

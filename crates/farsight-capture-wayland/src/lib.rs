@@ -75,6 +75,9 @@ pub struct Started {
     pub input: InputHandle,
     /// The portal's new restore token, if it issued one. Store it for the next [`start`].
     pub restore_token: Option<String>,
+    /// Whether input reaches the desktop. `false` when its portal only
+    /// shares the screen (no RemoteDesktop): the caller must run view-only.
+    pub can_control: bool,
 }
 
 /// Why capture could not start.

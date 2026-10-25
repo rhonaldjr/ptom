@@ -179,6 +179,8 @@ struct VideoFormatInfo {
     format: PixelFormat,
     width: u32,
     height: u32,
+    // Read only by the DMA-BUF path.
+    #[cfg_attr(not(feature = "dmabuf"), allow(dead_code))]
     memory: Memory,
 }
 

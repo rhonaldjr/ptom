@@ -57,7 +57,7 @@ Every update to the project publishes a new release on the
 [Releases page](https://github.com/rhonaldjr/ptom/releases), with downloads for:
 
 - Linux (Intel/AMD 64-bit and ARM 64-bit)
-- macOS (Apple Silicon). The macOS viewer is supported, but Linux comes first.
+- macOS (Apple Silicon and Intel), as a `.dmg` disk image. The macOS viewer is supported, but Linux comes first.
 
 **Pop!_OS / Ubuntu (22.04 or newer):** download the `.deb` files and install them:
 
@@ -66,8 +66,11 @@ sudo apt install ./farsight_*_amd64.deb          # the viewer (connect to other 
 sudo apt install ./farsight-agent_*_amd64.deb    # the agent (share this computer)
 ```
 
-Use the `arm64` files on ARM computers. **Other Linux and macOS:** download the `.tar.gz` file for your system,
-unpack it, and run `farsight`. On macOS, drag **Farsight.app** from the download into Applications. Fedora, Arch and Flatpak packages are planned.
+Use the `arm64` files on ARM computers. **Other Linux:** download the `.tar.gz` file for your system, unpack it,
+and run `farsight`. Fedora, Arch and Flatpak packages are planned.
+
+**macOS:** download the `.dmg` for your Mac (`aarch64` for Apple Silicon, `x86_64` for Intel), open it and drag
+**Farsight** into Applications. The app isn't signed yet, so the first time, right-click it and choose **Open**.
 
 ## Use the viewer
 
@@ -78,7 +81,9 @@ farsight -ViewOnly pop-os:1   # watch without controlling
 ```
 
 - Find **Farsight** in your app menu, or run `farsight`. Each computer opens in its own **tab**. The **Home** tab lists your computers and the ones on your network.
-- Press **F8** for the viewer menu: full screen, view only, Ctrl+Alt+Del, **Move to new window**, disconnect.
+- Press **F8** for the viewer menu: full screen, view only, Ctrl+Alt+Del, **Move to new window**, disconnect, and
+  **Remote size**: fit the window (sharp on 4K screens), 1920×1080, 2560×1440, 3440×1440, 3840×2160 or the
+  server's own size. `farsight -DesktopSize=2560x1440 <computer>` picks a size from the start.
 - The **tray icon** (COSMIC, KDE, Pop!_OS GNOME, Xfce) gives quick access to open sessions and saved computers.
   Desktops without a tray, such as vanilla GNOME, have everything in the window.
 - The window header always shows whether the connection is **encrypted**. Farsight uses encryption whenever the
@@ -120,6 +125,8 @@ systemctl --user enable --now farsight-agent    # start sharing now and at every
 - After changing passwords with `farsight-passwd`, `systemctl --user reload farsight-agent` applies them without
   disconnecting anyone.
 - If the viewer says **Connection refused**, sharing is off on that computer or set to "Only this computer".
+  If Farsight Sharing says the agent keeps stopping, it shows the agent's last error.
+- On desktops that don't let apps control the keyboard and mouse, the agent shares the screen **view-only**.
 - On Wayland, your desktop asks once whether Farsight may share the screen. Farsight remembers the answer;
   `farsight-agent --forget-portal-approval` forgets it.
 - When **you** connect with your own account, you get straight in. Anyone else has to be approved by whoever is at the

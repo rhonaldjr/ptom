@@ -150,6 +150,10 @@ SRV-11, ENC-8
 - [x] `unsafe` confined to one small crate, `farsight-gpu-sys`, with libraries loaded at run time (U-13, ADR-0021)
 - [x] Licensing review ([h264-licensing.md](../security/h264-licensing.md)): no blocker for opt-in H.264
 - [ ] Vulkan Video encode: deferred (P-54)
+- [x] Fixes from the second install (user feedback, P-55–P-57): wide Tight rectangles from TigerVNC on 2K/4K
+  desktops, remote size in the F8 menu and `-DesktopSize`, sharp "fit window" on HiDPI screens, window buttons on
+  GNOME, Wayland detection and view-only fallback for the agent, Farsight Sharing shows why the agent stops, and
+  macOS `.dmg` images (Apple Silicon and Intel) ([review](../reviews/2026-10-25-m10.1-feedback-review.md))
 - ⚠️ Still to do by hand before the features go into release builds (U-14): NVENC on the NVIDIA machine, DMA-BUF
   on a Wayland desktop, and a real session with each ([charter](../testing/charters/2026-10-25-gpu-h264.md))
 

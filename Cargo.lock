@@ -2285,6 +2285,7 @@ dependencies = [
 name = "farsight-sharing"
 version = "0.0.0"
 dependencies = [
+ "farsight-desktop",
  "farsight-discovery",
  "farsight-server",
  "farsight-vault",

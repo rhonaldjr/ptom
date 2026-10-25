@@ -90,6 +90,9 @@ pub struct Capture {
     pub input: Input,
     /// Headless only: the compositor thread, joined at shutdown.
     pub compositor: Option<std::thread::JoinHandle<()>>,
+    /// Whether viewers' input can reach the desktop (not on a Wayland
+    /// desktop whose portal only shares the screen).
+    pub can_control: bool,
 }
 
 /// Stops a headless desktop and waits (briefly) for its session to be cleaned up.
@@ -172,6 +175,7 @@ async fn start_wayland(token_file: &Path) -> Result<Capture> {
         events: rx,
         input: Input::Wayland(started.input),
         compositor: None,
+        can_control: started.can_control,
     })
 }
 
@@ -219,6 +223,7 @@ fn start_headless(setup: HeadlessSetup) -> Result<Capture> {
         events: rx,
         input: Input::Headless(started.handle),
         compositor: Some(started.thread),
+        can_control: true,
     })
 }
 
@@ -250,5 +255,6 @@ fn start_x11(display: Option<String>) -> Result<Capture> {
         events: rx,
         input: Input::X11(started.input),
         compositor: None,
+        can_control: true,
     })
 }

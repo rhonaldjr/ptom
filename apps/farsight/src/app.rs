@@ -20,7 +20,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::nearby::{Discovery, Encryption, Nearby, NearbyEntry, Scan};
 use crate::store::{Entry, Remember, Store};
-use crate::tab::{ConnectRequest, Net, Outcome, Tab, TabId, TabMessage, connection};
+use crate::tab::{ConnectRequest, Net, Outcome, RemoteSize, Tab, TabId, TabMessage, connection};
 use crate::views::{centred, to_u16};
 
 /// Approximate height of the COSMIC header bar, in logical pixels.
@@ -81,6 +81,8 @@ pub enum Message {
     },
     WindowFocused(window::Id),
     WindowResized(window::Id, Size),
+    /// A resize, with the window's scale factor (screen pixels per unit).
+    WindowScaled(window::Id, Size, f32),
     WindowClosed(window::Id),
     ResizeTick,
     LocalClipboard(window::Id, Option<String>),
@@ -121,6 +123,9 @@ pub struct App {
     active: Option<TabId>,
     tray: Option<TrayHandle>,
     tray_model: TrayModel,
+    /// Each window's latest size (logical units) and scale factor, so a tab
+    /// that connects or becomes active can fit itself without a resize.
+    window_sizes: std::collections::HashMap<window::Id, (Size, f32)>,
 }
 
 impl cosmic::Application for App {
@@ -157,6 +162,7 @@ impl cosmic::Application for App {
             active: None,
             tray: None,
             tray_model: TrayModel::default(),
+            window_sizes: std::collections::HashMap::new(),
         };
         let mut tasks = vec![app.update_title(), app.start_tray()];
         app.scan_if_trusted();
@@ -271,6 +277,8 @@ impl App {
             Message::CloseTab(id) => return self.close_tab(id),
             Message::Tab(id, message) => return self.on_tab_message(id, message),
             Message::Net(id, net) => {
+                // Current before `Connected` applies the size choice.
+                self.refit(id);
                 let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else {
                     return Task::none();
                 };
@@ -283,9 +291,11 @@ impl App {
             | Message::WindowFocused(_)
             | Message::LocalClipboard(..)
             | Message::WindowResized(..)
+            | Message::WindowScaled(..)
             | Message::ResizeTick => return self.on_input(message),
             Message::Noop => {}
             Message::WindowClosed(window) => {
+                self.window_sizes.remove(&window);
                 if let Some(id) = self
                     .tabs
                     .iter()
@@ -352,7 +362,13 @@ impl App {
                     tab.command(farsight_net::Command::Clipboard(text));
                 }
             }
-            Message::WindowResized(window, size) => self.on_resized(window, size),
+            // Ask for the window's scale first: remote sizes are in screen pixels.
+            Message::WindowResized(window, size) => {
+                return window::scale_factor(window).map(move |scale| {
+                    cosmic::Action::App(Message::WindowScaled(window, size, scale))
+                });
+            }
+            Message::WindowScaled(window, size, scale) => self.on_resized(window, size, scale),
             Message::ResizeTick => {
                 for tab in &mut self.tabs {
                     if let Some((width, height)) = tab.pending_resize.take() {
@@ -366,6 +382,7 @@ impl App {
     }
 
     fn on_tab_message(&mut self, id: TabId, message: TabMessage) -> Task<Message> {
+        self.refit(id);
         let window = self.window_of(id);
         let Some(tab) = self.tab_mut(id) else {
             return Task::none();
@@ -447,7 +464,13 @@ impl App {
             pinned: known.pinned,
         };
         let f8 = self.options.menu_key.eq_ignore_ascii_case("F8");
-        self.tabs.push(Tab::new(request, address, stored, f8));
+        let remote_size = match (self.options.desktop_size, self.options.remote_resize) {
+            (Some((width, height)), _) => RemoteSize::Fixed(width, height),
+            (None, true) => RemoteSize::FitWindow,
+            (None, false) => RemoteSize::Server,
+        };
+        self.tabs
+            .push(Tab::new(request, address, stored, f8, remote_size));
         let activate = self.activate(Some(id));
         if self.options.full_screen {
             let window = self.core.main_window_id();
@@ -466,6 +489,16 @@ impl App {
             previous.release_keys();
         }
         self.active = id;
+        // A tab shown again fits the window as it is now.
+        if let Some(id) = id {
+            self.refit(id);
+            if let Some(tab) = self.tab_mut(id)
+                && tab.remote_size == RemoteSize::FitWindow
+                && tab.connected.is_some()
+            {
+                tab.pending_resize = tab.fit_size;
+            }
+        }
         let full_screen = self.active_tab().is_some_and(|t| t.full_screen);
         self.core.window.show_headerbar = !full_screen;
         self.update_title()
@@ -518,20 +551,55 @@ impl App {
         Task::batch(tasks)
     }
 
-    fn on_resized(&mut self, window: window::Id, size: Size) {
-        if !self.options.remote_resize {
-            return;
+    fn on_resized(&mut self, window: window::Id, size: Size, scale: f32) {
+        self.window_sizes.insert(window, (size, scale));
+        let shown = if self.core.main_window_id() == Some(window) {
+            self.active
+        } else {
+            self.tabs
+                .iter()
+                .find(|t| t.window == Some(window))
+                .map(|t| t.id)
+        };
+        if let Some(id) = shown {
+            self.refit(id);
+            if let Some(tab) = self.tab_mut(id)
+                && tab.remote_size == RemoteSize::FitWindow
+            {
+                tab.pending_resize = tab.fit_size;
+            }
         }
-        let is_main = self.core.main_window_id() == Some(window);
-        let tab_bar = is_main && self.tabs.iter().any(|t| t.window.is_none());
-        if let Some(tab) = self.tab_for_window(window) {
-            // The header bar and tab bar take part of the main window unless full screen.
-            let chrome = if tab.full_screen || !is_main {
-                0.0
-            } else {
-                HEADER_HEIGHT + if tab_bar { TAB_BAR_HEIGHT } else { 0.0 }
-            };
-            tab.pending_resize = Some((to_u16(size.width), to_u16(size.height - chrome)));
+    }
+
+    /// Updates a tab's "fit window" size from its window's latest size: in
+    /// screen pixels, so a 4K screen at 200% asks for 3840×2160.
+    fn refit(&mut self, id: TabId) {
+        let main = self.core.main_window_id();
+        let tab_bar = self.tabs.iter().any(|t| t.window.is_none());
+        let Some(tab) = self.tabs.iter().find(|t| t.id == id) else {
+            return;
+        };
+        let window = tab.window.or(main);
+        let Some(&(size, scale)) = window.and_then(|w| self.window_sizes.get(&w)) else {
+            return;
+        };
+        // The header bar and tab bar take part of the main window unless full screen.
+        let chrome = if tab.full_screen || tab.window.is_some() {
+            0.0
+        } else {
+            HEADER_HEIGHT + if tab_bar { TAB_BAR_HEIGHT } else { 0.0 }
+        };
+        let scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+        let fit = (
+            to_u16((size.width * scale).round()),
+            to_u16(((size.height - chrome) * scale).round()),
+        );
+        if let Some(tab) = self.tab_mut(id) {
+            tab.fit_size = Some(fit);
         }
     }
 

@@ -5,6 +5,7 @@
 //!
 //! Layer: **Adapters** (ADR-0002).
 
+pub mod icon_theme;
 #[cfg(target_os = "linux")]
 mod icons;
 pub mod notify;

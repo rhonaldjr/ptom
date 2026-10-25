@@ -53,6 +53,7 @@ pub(crate) async fn start(options: Options) -> Result<Started, CaptureError> {
             return Err(error);
         }
     };
+    let can_control = matches!(opened.portal, portal::Sharing::Full(_));
     let (input, input_rx) = InputHandle::channel();
     let supervisor = portal::Supervisor {
         opened_portal: opened.portal,
@@ -68,5 +69,6 @@ pub(crate) async fn start(options: Options) -> Result<Started, CaptureError> {
         events,
         input,
         restore_token: opened.restore_token,
+        can_control,
     })
 }

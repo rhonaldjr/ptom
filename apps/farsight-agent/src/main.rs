@@ -175,7 +175,7 @@ async fn run(
 
     let backend = options.backend.resolve(
         std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
-        std::env::var_os("WAYLAND_DISPLAY").is_some(),
+        std::env::var_os("WAYLAND_DISPLAY").is_some() || wayland_socket_present(),
     );
     let token_file = portal_token_file();
     if options.forget_portal_approval {
@@ -189,13 +189,18 @@ async fn run(
     let mut setup = headless_setup(&options, headless, port)?;
     setup.session_umask = session_umask;
     let capture = capture::start(backend, &token_file, setup).await?;
+    if !capture.can_control && !options.view_only {
+        warn!(
+            "this desktop only lets apps share the screen, not control it: every viewer is view-only"
+        );
+    }
     let settings = Settings {
         owner: owner(),
         tls: farsight_net::tls_acceptor(&identity.cert_pem, &identity.key_pem)?,
         ra2: Arc::clone(&identity.ra2),
         logins,
         allow_legacy: options.allow_legacy,
-        view_only: options.view_only,
+        view_only: options.view_only || !capture.can_control,
         headless,
         video,
     };
@@ -459,10 +464,30 @@ fn host_name() -> String {
         .unwrap_or_else(|| "farsight".into())
 }
 
-/// Defaults from `~/.config/farsight/agent/settings` (written by the
-/// Farsight Sharing app); missing or unreadable means the built-in ones.
-/// The live desktop's defaults from the Farsight Sharing settings file.
-/// Network access chosen there is logged, so it never goes unnoticed.
+/// A Wayland compositor's socket in our runtime folder. As a systemd user
+/// service the agent may not get `WAYLAND_DISPLAY` (the desktop decides what
+/// it exports), but the socket shows a Wayland session is running; the
+/// portals it then uses only need the session's D-Bus.
+fn wayland_socket_present() -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") else {
+        return false;
+    };
+    std::fs::read_dir(runtime).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("wayland-")
+                && !name.ends_with(".lock")
+                && entry.file_type().is_ok_and(|t| t.is_socket())
+        })
+    })
+}
+
+/// The live desktop's defaults from `~/.config/farsight/agent/settings`
+/// (written by the Farsight Sharing app); missing or unreadable means the
+/// built-in ones. Network access chosen there is logged, so it never goes
+/// unnoticed.
 fn settings_file_defaults() -> AgentOptions {
     let Some(path) = Identity::default_dir().ok().map(|dir| dir.join("settings")) else {
         return AgentOptions::default();

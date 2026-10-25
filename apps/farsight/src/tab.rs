@@ -77,6 +77,20 @@ pub enum Net {
     Failed(String),
 }
 
+/// How big the remote desktop should be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteSize {
+    /// Follow the viewer window (in real screen pixels, so it stays sharp).
+    FitWindow,
+    /// A fixed size.
+    Fixed(u16, u16),
+    /// Whatever the server has; never ask it to change.
+    Server,
+}
+
+/// Sizes offered in the viewer menu.
+const SIZE_PRESETS: [(u16, u16); 4] = [(1920, 1080), (2560, 1440), (3440, 1440), (3840, 2160)];
+
 /// Messages handled by one tab.
 #[derive(Debug, Clone)]
 pub enum TabMessage {
@@ -95,6 +109,7 @@ pub enum TabMessage {
     /// Send `KEY_COMBOS[index]`.
     SendCombo(usize),
     MoveToWindow,
+    SetRemoteSize(RemoteSize),
     PointerMoved {
         remote: (u16, u16),
         local: Point,
@@ -129,6 +144,9 @@ pub struct Tab {
     pub connected: Option<Connected>,
     pub window: Option<window::Id>,
     pub pending_resize: Option<(u16, u16)>,
+    pub remote_size: RemoteSize,
+    /// The window's size in screen pixels (what "fit window" asks for).
+    pub fit_size: Option<(u16, u16)>,
     pub full_screen: bool,
     handle: Option<ConnectionHandle>,
     frame: Option<(image::Handle, u32, u32)>,
@@ -156,6 +174,7 @@ impl Tab {
         address: ServerAddress,
         stored_credentials: Option<Remember>,
         menu_key_f8: bool,
+        remote_size: RemoteSize,
     ) -> Self {
         Self {
             id: request.tab,
@@ -166,6 +185,8 @@ impl Tab {
             connected: None,
             window: None,
             pending_resize: None,
+            remote_size,
+            fit_size: None,
             full_screen: false,
             handle: None,
             frame: None,
@@ -184,6 +205,15 @@ impl Tab {
             remember: false,
             change_acknowledged: false,
             menu_key_f8,
+        }
+    }
+
+    /// The size to ask the server for under the current choice, if any.
+    pub fn wanted_size(&self) -> Option<(u16, u16)> {
+        match self.remote_size {
+            RemoteSize::FitWindow => self.fit_size,
+            RemoteSize::Fixed(width, height) => Some((width, height)),
+            RemoteSize::Server => None,
         }
     }
 
@@ -254,6 +284,11 @@ impl Tab {
             TabMessage::MoveToWindow => {
                 self.menu_open = false;
                 return Outcome::Detach;
+            }
+            TabMessage::SetRemoteSize(size) => {
+                self.menu_open = false;
+                self.remote_size = size;
+                self.pending_resize = self.wanted_size();
             }
             TabMessage::PointerMoved { remote, local } => {
                 self.pointer = remote;
@@ -348,6 +383,8 @@ impl Tab {
                     leds: None,
                 });
                 self.screen = TabScreen::Desktop;
+                // Apply the size choice now that the server can take it.
+                self.pending_resize = self.wanted_size();
             }
             SessionEvent::Leds(leds) => {
                 if let Some(connected) = &mut self.connected {
@@ -820,7 +857,42 @@ impl Tab {
         {
             row = row.push(security_badge(connected));
         }
-        row.spacing(8).padding(8).into()
+        widget::Column::new()
+            .push(row.spacing(8))
+            .push(self.size_menu())
+            .spacing(8)
+            .padding(8)
+            .into()
+    }
+
+    /// "Remote size": fit the window, a preset, or the server's own size.
+    fn size_menu(&self) -> Element<'_, Message> {
+        let choice = |label: String, size: RemoteSize| {
+            let button = if self.remote_size == size {
+                widget::button::suggested(label)
+            } else {
+                widget::button::standard(label)
+            };
+            button.on_press(self.message(TabMessage::SetRemoteSize(size)))
+        };
+        let mut row = widget::Row::new()
+            .push(widget::text::body("Remote size:"))
+            .push(choice("Fit window".into(), RemoteSize::FitWindow));
+        for (width, height) in SIZE_PRESETS {
+            row = row.push(choice(
+                format!("{width}×{height}"),
+                RemoteSize::Fixed(width, height),
+            ));
+        }
+        if let RemoteSize::Fixed(width, height) = self.remote_size
+            && !SIZE_PRESETS.contains(&(width, height))
+        {
+            row = row.push(choice(format!("{width}×{height}"), self.remote_size));
+        }
+        row.push(choice("Server's size".into(), RemoteSize::Server))
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into()
     }
 }
 

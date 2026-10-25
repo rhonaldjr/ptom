@@ -18,7 +18,10 @@ pub const PORT: u16 = 5900;
 /// Everything the window shows.
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
+    /// Sharing is turned on (starts at login).
     pub sharing: bool,
+    /// Turned on, but the agent isn't running: its last error, if any.
+    pub problem: Option<String>,
     pub settings: SharingSettings,
     /// `None` when the network can't be identified (no gateway).
     pub network_trusted: Option<bool>,
@@ -43,7 +46,8 @@ pub fn snapshot() -> Snapshot {
         .and_then(|d| std::fs::read_to_string(d.join("settings")).ok())
         .map_or_else(SharingSettings::default, |t| SharingSettings::parse(&t));
     Snapshot {
-        sharing: systemctl(&["is-active", "--quiet", UNIT]),
+        sharing: systemctl(&["is-enabled", "--quiet", UNIT]),
+        problem: problem(),
         settings,
         network_trusted: network_trusted(dir.as_ref()),
         host: std::fs::read_to_string("/proc/sys/kernel/hostname")
@@ -168,18 +172,76 @@ pub enum Sharing {
     Off,
 }
 
+/// How long the agent gets to fail before we believe it started (it can
+/// stop a moment after systemd reports it running).
+const START_CHECK: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Why sharing is on but the agent isn't running (`None` when it is
+/// running, or sharing is off).
+fn problem() -> Option<String> {
+    if !systemctl(&["is-enabled", "--quiet", UNIT]) || systemctl(&["is-active", "--quiet", UNIT]) {
+        return None;
+    }
+    let log = run(
+        "journalctl",
+        &["--user", "-u", UNIT, "-n", "30", "--no-pager", "-o", "cat"],
+    )
+    .unwrap_or_default();
+    Some(last_error(&log).unwrap_or_else(|| "The agent isn't running.".into()))
+}
+
+/// The agent's last error from its log (colour codes removed), or its last
+/// line.
+fn last_error(log: &str) -> Option<String> {
+    let lines: Vec<String> = log
+        .lines()
+        .map(strip_colours)
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    lines
+        .iter()
+        .rev()
+        .find(|l| l.contains("Error") || l.contains("error") || l.contains("ERROR"))
+        .or_else(|| lines.last())
+        .map(|l| l.trim().to_owned())
+}
+
+/// Most characters of a log line shown in the window.
+const MAX_SHOWN: usize = 300;
+
+/// A log line made safe to show: colour codes (`ESC [ … m`) removed, other
+/// control and bidi-override characters dropped, and the length capped.
+fn strip_colours(line: &str) -> String {
+    let mut out = String::with_capacity(line.len().min(MAX_SHOWN));
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else if !c.is_control() && !matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        {
+            out.push(c);
+        }
+        if out.chars().count() >= MAX_SHOWN {
+            break;
+        }
+    }
+    out
+}
+
 /// Starts sharing now and at every login, or stops it.
 pub fn set_sharing(sharing: Sharing) -> Result<String, String> {
     let on = sharing == Sharing::On;
     let verb = if on { "enable" } else { "disable" };
     run("systemctl", &["--user", verb, "--now", UNIT])?;
-    if on && !systemctl(&["is-active", "--quiet", UNIT]) {
-        let log = run(
-            "journalctl",
-            &["--user", "-u", UNIT, "-n", "5", "--no-pager", "-o", "cat"],
-        )
-        .unwrap_or_default();
-        return Err(format!("Sharing didn't start. {log}"));
+    if on {
+        std::thread::sleep(START_CHECK);
+        if let Some(problem) = problem() {
+            return Err(format!("Sharing is on, but the agent stopped: {problem}"));
+        }
     }
     Ok(if on {
         "Sharing is on."
@@ -260,6 +322,23 @@ pub fn set_password(password: &SecretString) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_last_error_line_is_found_without_colour_codes() {
+        let log = "\u{1b}[32m INFO\u{1b}[0m starting\nError: no RemoteDesktop portal on COSMIC\nfarsight-agent.service: Main process exited\n";
+        assert_eq!(
+            last_error(log).as_deref(),
+            Some("Error: no RemoteDesktop portal on COSMIC")
+        );
+        assert_eq!(
+            last_error("just one line\n").as_deref(),
+            Some("just one line")
+        );
+        assert_eq!(last_error(""), None);
+        // Control and bidi-override characters never reach the window.
+        assert_eq!(strip_colours("a\u{7}b\u{202e}c"), "abc");
+        assert_eq!(strip_colours(&"x".repeat(1000)).len(), MAX_SHOWN);
+    }
 
     #[test]
     fn ipv6_is_shown_only_without_ipv4() {

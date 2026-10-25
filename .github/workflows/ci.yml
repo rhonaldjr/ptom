@@ -55,6 +55,13 @@ jobs:
             # The agent and its capture backends are Linux-only (ADR-0004); PipeWire doesn't build on macOS.
             cargo test --workspace --locked --exclude farsight-agent --exclude farsight-capture-wayland --exclude farsight-capture-x11 --exclude farsight-headless
           fi
+      - name: macOS app bundle and disk image (as the release builds them)
+        if: runner.os == 'macOS'
+        run: |
+          cargo build -p farsight --locked
+          scripts/macos-app.sh 0.0.0 target/debug/farsight dist
+          scripts/macos-dmg.sh 0.0.0 dist/Farsight.app dist/farsight-test.dmg
+          hdiutil imageinfo dist/farsight-test.dmg >/dev/null
       - name: Tray icon on a private D-Bus (with and without a host)
         if: runner.os == 'Linux'
         run: dbus-run-session -- env FARSIGHT_TRAY_TEST=1 cargo test -p farsight-desktop --test tray_host --locked

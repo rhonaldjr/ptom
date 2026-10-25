@@ -53,7 +53,9 @@ fn main() -> ExitCode {
             }
         };
 
-    let settings = Settings::default().size(Size::new(1280.0, 800.0));
+    let settings = Settings::default()
+        .size(Size::new(1280.0, 800.0))
+        .default_icon_theme(farsight_desktop::icon_theme::for_libcosmic().unwrap_or_default());
     match cosmic::app::run::<app::App>(settings, options) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

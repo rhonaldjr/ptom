@@ -1,5 +1,7 @@
 //! The xdg-desktop-portal side: one RemoteDesktop session with a ScreenCast source, the input
-//! it injects, and the task that owns the session for as long as the capture runs.
+//! it injects, and the task that owns the session for as long as the capture runs. Desktops
+//! whose portal can't inject input (no RemoteDesktop) get a ScreenCast-only session: the
+//! screen is shared view-only and input is dropped.
 
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
@@ -11,6 +13,7 @@ use ashpd::desktop::remote_desktop::{
 };
 use ashpd::desktop::screencast::{
     CursorMode, OpenPipeWireRemoteOptions, Screencast, SelectSourcesOptions, SourceType,
+    StartCastOptions,
 };
 use ashpd::desktop::{CreateSessionOptions, PersistMode, ResponseError, Session};
 use ashpd::enumflags2::BitFlags;
@@ -28,9 +31,51 @@ pub(super) struct Portal {
     session: Session<RemoteDesktop>,
 }
 
+/// The portal session behind a capture.
+pub(super) enum Sharing {
+    /// Screen and input (RemoteDesktop with a ScreenCast source).
+    Full(Portal),
+    /// Screen only: this desktop's portal can't inject input.
+    ScreenOnly(Session<Screencast>),
+}
+
+impl Sharing {
+    /// Ends the session (failure only logged: it dies with our D-Bus connection anyway).
+    pub async fn close(&self) {
+        let result = match self {
+            Self::Full(portal) => portal.session.close().await,
+            Self::ScreenOnly(session) => session.close().await,
+        };
+        if let Err(error) = result {
+            tracing::debug!("closing the portal session failed: {error}");
+        }
+    }
+
+    /// Resolves when the desktop closes the session (e.g. the person stops sharing).
+    async fn closed(&self) {
+        match self {
+            Self::Full(portal) => wait_closed(&portal.session).await,
+            Self::ScreenOnly(session) => wait_closed(session).await,
+        }
+    }
+}
+
+async fn wait_closed<T: ashpd::desktop::SessionPortal>(session: &Session<T>) {
+    match session.receive_closed().await {
+        Ok(signals) => {
+            let mut signals = std::pin::pin!(signals);
+            signals.next().await;
+        }
+        Err(error) => {
+            tracing::debug!("cannot watch the portal session: {error}");
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
 /// What [`open`] hands back.
 pub(super) struct Opened {
-    pub portal: Portal,
+    pub portal: Sharing,
     pub pipewire_fd: OwnedFd,
     pub node_id: u32,
     /// The stream's size in the portal's logical coordinates, if it said.
@@ -64,8 +109,29 @@ fn portal_error(error: ashpd::Error) -> CaptureError {
     }
 }
 
-/// Opens the portals, asks for keyboard, pointer and one monitor, and starts the session.
+/// Opens the portals and starts the session: screen and input when the desktop allows it,
+/// otherwise the screen alone (view-only, with a warning).
 pub(super) async fn open(options: &Options) -> Result<Opened, CaptureError> {
+    match open_full(options).await {
+        Err(
+            CaptureError::PortalMissing {
+                portal: "RemoteDesktop",
+                desktop,
+            }
+            | CaptureError::DevicesUnavailable { desktop },
+        ) => {
+            tracing::warn!(
+                "{desktop}'s portal can't let apps control the keyboard and mouse; \
+                 sharing the screen view-only"
+            );
+            open_screen_only(options).await
+        }
+        other => other,
+    }
+}
+
+/// A RemoteDesktop session: keyboard, pointer and one monitor.
+async fn open_full(options: &Options) -> Result<Opened, CaptureError> {
     let remote = RemoteDesktop::new()
         .await
         .map_err(|_| missing("RemoteDesktop"))?;
@@ -79,6 +145,29 @@ pub(super) async fn open(options: &Options) -> Result<Opened, CaptureError> {
             desktop: desktop_name(),
         });
     }
+    let (screencast, cursor_mode) = screencast().await?;
+    let session = remote
+        .create_session(CreateSessionOptions::default())
+        .await
+        .map_err(portal_error)?;
+    let portal = Portal { remote, session };
+    match portal.negotiate(&screencast, options, cursor_mode).await {
+        Ok((negotiated, pipewire_fd)) => Ok(Opened {
+            portal: Sharing::Full(portal),
+            pipewire_fd,
+            node_id: negotiated.node_id,
+            logical_size: negotiated.logical_size,
+            restore_token: negotiated.restore_token,
+        }),
+        Err(error) => {
+            Sharing::Full(portal).close().await;
+            Err(error)
+        }
+    }
+}
+
+/// The ScreenCast portal and the best cursor mode it offers.
+async fn screencast() -> Result<(Screencast, CursorMode), CaptureError> {
     let screencast = Screencast::new().await.map_err(|_| missing("ScreenCast"))?;
     let cursor_modes = screencast
         .available_cursor_modes()
@@ -89,22 +178,66 @@ pub(super) async fn open(options: &Options) -> Result<Opened, CaptureError> {
     } else {
         CursorMode::Embedded
     };
+    Ok((screencast, cursor_mode))
+}
 
-    let session = remote
+/// A ScreenCast-only session: one monitor, no input.
+async fn open_screen_only(options: &Options) -> Result<Opened, CaptureError> {
+    let (screencast, cursor_mode) = screencast().await?;
+    let session = screencast
         .create_session(CreateSessionOptions::default())
         .await
         .map_err(portal_error)?;
-    let portal = Portal { remote, session };
-    match portal.negotiate(&screencast, options, cursor_mode).await {
+    let persist = if options.persist {
+        PersistMode::ExplicitlyRevoked
+    } else {
+        PersistMode::DoNot
+    };
+    let started = async {
+        screencast
+            .select_sources(
+                &session,
+                SelectSourcesOptions::default()
+                    .set_sources(BitFlags::from(SourceType::Monitor))
+                    .set_multiple(false)
+                    .set_cursor_mode(cursor_mode)
+                    .set_persist_mode(persist)
+                    .set_restore_token(options.restore_token.as_deref()),
+            )
+            .await
+            .and_then(|request| request.response())
+            .map_err(portal_error)?;
+        let selected = screencast
+            .start(&session, None, StartCastOptions::default())
+            .await
+            .and_then(|request| request.response())
+            .map_err(portal_error)?;
+        let stream = selected.streams().first().ok_or(CaptureError::NoStream)?;
+        let logical_size = stream.size().and_then(|(width, height)| {
+            Some((u32::try_from(width).ok()?, u32::try_from(height).ok()?))
+        });
+        let negotiated = Negotiated {
+            node_id: stream.pipe_wire_node_id(),
+            logical_size: logical_size.filter(|&(w, h)| w > 0 && h > 0),
+            restore_token: selected.restore_token().map(str::to_owned),
+        };
+        let fd = screencast
+            .open_pipe_wire_remote(&session, OpenPipeWireRemoteOptions::default())
+            .await
+            .map_err(portal_error)?;
+        Ok::<_, CaptureError>((negotiated, fd))
+    }
+    .await;
+    match started {
         Ok((negotiated, pipewire_fd)) => Ok(Opened {
-            portal,
+            portal: Sharing::ScreenOnly(session),
             pipewire_fd,
             node_id: negotiated.node_id,
             logical_size: negotiated.logical_size,
             restore_token: negotiated.restore_token,
         }),
         Err(error) => {
-            portal.close().await;
+            Sharing::ScreenOnly(session).close().await;
             Err(error)
         }
     }
@@ -177,13 +310,6 @@ impl Portal {
             .await
             .map_err(portal_error)?;
         Ok((negotiated, fd))
-    }
-
-    /// Ends the session. Failure is only logged: the session dies with our D-Bus connection.
-    pub async fn close(&self) {
-        if let Err(error) = self.session.close().await {
-            tracing::debug!("closing the portal session failed: {error}");
-        }
     }
 }
 
@@ -355,7 +481,7 @@ enum Stop {
 
 /// Everything the supervisor owns.
 pub(super) struct Supervisor {
-    pub opened_portal: Portal,
+    pub opened_portal: Sharing,
     pub node_id: u32,
     pub logical_size: Option<(u32, u32)>,
     pub frame_size: Arc<FrameSize>,
@@ -387,18 +513,7 @@ impl Supervisor {
             held_keysyms: std::collections::HashSet::new(),
             held_codes: std::collections::HashSet::new(),
         };
-        let session_closed = async {
-            match portal.session.receive_closed().await {
-                Ok(signals) => {
-                    let mut signals = std::pin::pin!(signals);
-                    signals.next().await;
-                }
-                Err(error) => {
-                    tracing::debug!("cannot watch the portal session: {error}");
-                    std::future::pending::<()>().await;
-                }
-            }
-        };
+        let session_closed = portal.closed();
         let mut session_closed = std::pin::pin!(session_closed);
         let mut input_open = true;
 
@@ -406,7 +521,10 @@ impl Supervisor {
             tokio::select! {
                 event = input.recv(), if input_open => match event {
                     Some(event) => {
-                        if let Err(error) = injector.inject(&portal, event).await {
+                        // Screen-only sessions can't inject: input is dropped.
+                        if let Sharing::Full(full) = &portal
+                            && let Err(error) = injector.inject(full, event).await
+                        {
                             // The error text never includes the event (it may be a keystroke).
                             tracing::debug!("the portal rejected an input event: {error}");
                         }

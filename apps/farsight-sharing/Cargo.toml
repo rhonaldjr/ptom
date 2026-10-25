@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+farsight-desktop.workspace = true
 farsight-discovery.workspace = true
 farsight-server.workspace = true
 farsight-vault.workspace = true

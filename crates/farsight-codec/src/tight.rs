@@ -20,7 +20,9 @@ use crate::inflate::ZlibStream;
 use crate::util::{compact_length, mul, need};
 use crate::{Framebuffer, PixelConverter};
 
-/// Tight rectangles may not be wider than this.
+/// Tight rectangles using basic compression (copy, palette or gradient
+/// filters) may not be wider than this. Fill and JPEG rectangles may be any
+/// width: TigerVNC sends them wider on 2K and 4K desktops.
 pub(crate) const MAX_WIDTH: u16 = 2048;
 /// Filtered data shorter than this is sent without zlib.
 const MIN_TO_COMPRESS: usize = 12;
@@ -61,13 +63,6 @@ pub(crate) fn decode(
     input: &[u8],
 ) -> Result<Option<usize>, DecodeError> {
     fb.check(rect)?;
-    if rect.width > MAX_WIDTH {
-        return Err(DecodeError::LimitExceeded {
-            what: "Tight rectangle width",
-            len: u64::from(rect.width),
-            max: u64::from(MAX_WIDTH),
-        });
-    }
     let tpixel = CompactPixel::tpixel(converter);
     let mut r = Reader::new(input);
     let control = need!(r.u8());
@@ -78,6 +73,7 @@ pub(crate) fn decode(
             Plan::Jpeg(need!(r.bytes(len)))
         }
         kind @ 0x0..=0x7 => {
+            check_basic_width(rect)?;
             let filter = if kind & 0x4 == 0 {
                 Filter::Copy
             } else {
@@ -96,6 +92,7 @@ pub(crate) fn decode(
             Plan::Basic { filter, len, data }
         }
         kind @ (0xA | 0xE) => {
+            check_basic_width(rect)?;
             let filter = if kind == 0xE {
                 need!(read_filter(&mut r, tpixel))
             } else {
@@ -130,6 +127,18 @@ pub(crate) fn decode(
         }
     }
     Ok(Some(r.consumed()))
+}
+
+/// The width limit applies to basic compression only.
+fn check_basic_width(rect: Rect) -> Result<(), DecodeError> {
+    if rect.width > MAX_WIDTH {
+        return Err(DecodeError::LimitExceeded {
+            what: "Tight basic-compression rectangle width",
+            len: u64::from(rect.width),
+            max: u64::from(MAX_WIDTH),
+        });
+    }
+    Ok(())
 }
 
 fn read_filter(r: &mut Reader<'_>, tpixel: CompactPixel<'_>) -> Result<Filter, DecodeError> {
@@ -718,6 +727,18 @@ mod tests {
     }
 
     #[test]
+    fn wide_fill_rectangles_decode() {
+        // Regression: TigerVNC on a 2K/4K desktop sends Tight fill (and JPEG)
+        // rectangles wider than 2048; only basic compression has that limit.
+        let mut s = Session::new(3840, 2);
+        let rect = Rect::new(0, 0, 2255, 2);
+        let mut fill = vec![0x80];
+        fill.extend(tp(RED));
+        assert_eq!(s.decode(rect, &fill), Ok(Some(4)));
+        assert_eq!(s.fb.get(2254, 1), Some(RED));
+    }
+
+    #[test]
     fn invalid_payloads_are_rejected() {
         let rect = Rect::new(0, 0, 4, 4);
         let mut s = Session::new(4, 4);
@@ -740,10 +761,10 @@ mod tests {
         // Too little output.
         let short = basic(0x00, &[], &[0; 47], &mut Deflater::default());
         assert!(s.decode(rect, &short).is_err());
-        // Too wide.
+        // Basic compression wider than 2048 is refused.
         let mut wide = Session::new(3000, 1);
         assert!(matches!(
-            wide.decode(Rect::new(0, 0, 2049, 1), &[0x80, 0, 0, 0]),
+            wide.decode(Rect::new(0, 0, 2049, 1), &[0x00, 0, 0, 0]),
             Err(DecodeError::LimitExceeded { .. })
         ));
         // Out of bounds.
