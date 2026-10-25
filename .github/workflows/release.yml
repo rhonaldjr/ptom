@@ -125,7 +125,7 @@ jobs:
       - name: Checksums
         # macOS is tier 2: its files may be missing if that build failed.
         run: cd dist && shopt -s nullglob && sha256sum *.tar.gz *.deb *.dmg benchmarks-*.txt > SHA256SUMS
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*
       - uses: taiki-e/install-action@v2
