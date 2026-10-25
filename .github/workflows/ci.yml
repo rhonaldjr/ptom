@@ -18,7 +18,7 @@ jobs:
   lint:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install GUI build libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libfontconfig-dev libfreetype-dev libdbus-1-dev libpipewire-0.3-dev libclang-dev libpixman-1-dev && sudo bash ci/install-spa-headers.sh
@@ -41,7 +41,7 @@ jobs:
     # macOS is tier 2 (ADR-0004): reported, never release-blocking.
     continue-on-error: ${{ matrix.os == 'macos-latest' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Install GUI build libraries
         if: runner.os == 'Linux'
@@ -74,7 +74,7 @@ jobs:
     name: interop (${{ matrix.server }} ${{ matrix.security }})
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Start the server
@@ -98,7 +98,7 @@ jobs:
     # The other direction: TigerVNC's own viewer connects to the Farsight agent.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libpixman-1-dev
@@ -109,7 +109,7 @@ jobs:
     # farsight-agent sharing a real X server (Xvfb), checked by a Farsight viewer session (M5).
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils x11-xserver-utils libxkbcommon-dev libpixman-1-dev
@@ -122,7 +122,7 @@ jobs:
     # (X11 apps); foot is the Wayland app in the end-to-end test.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libpixman-1-dev xwayland libegl1 foot fonts-dejavu-core
@@ -134,13 +134,13 @@ jobs:
   deny:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   fuzz-smoke:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # AddressSanitizer crashes on runner kernels with high mmap randomisation.
       - name: Make ASan-compatible address randomisation
         run: sudo sysctl -w vm.mmap_rnd_bits=28
