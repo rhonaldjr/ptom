@@ -126,7 +126,8 @@ systemctl --user enable --now farsight-agent    # start sharing now and at every
   disconnecting anyone.
 - If the viewer says **Connection refused**, sharing is off on that computer or set to "Only this computer".
   If Farsight Sharing says the agent keeps stopping, it shows the agent's last error.
-- On desktops that don't let apps control the keyboard and mouse, the agent shares the screen **view-only**.
+- On COSMIC (1.6 or newer) and recent GNOME, viewers control the mouse and keyboard through the desktop's
+  remote-desktop service (libei). Desktops without one, such as COSMIC before 1.6, are shared **view-only**.
 - On Wayland, your desktop asks once whether Farsight may share the screen. Farsight remembers the answer;
   `farsight-agent --forget-portal-approval` forgets it.
 - When **you** connect with your own account, you get straight in. Anyone else has to be approved by whoever is at the

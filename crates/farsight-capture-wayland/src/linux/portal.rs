@@ -7,8 +7,8 @@ use std::os::fd::OwnedFd;
 use std::sync::Arc;
 
 use ashpd::desktop::remote_desktop::{
-    Axis, DeviceType, KeyState, NotifyKeyboardKeycodeOptions, NotifyKeyboardKeysymOptions,
-    NotifyPointerAxisDiscreteOptions, NotifyPointerButtonOptions,
+    Axis, ConnectToEISOptions, DeviceType, KeyState, NotifyKeyboardKeycodeOptions,
+    NotifyKeyboardKeysymOptions, NotifyPointerAxisDiscreteOptions, NotifyPointerButtonOptions,
     NotifyPointerMotionAbsoluteOptions, RemoteDesktop, SelectDevicesOptions, StartOptions,
 };
 use ashpd::desktop::screencast::{
@@ -21,6 +21,7 @@ use futures_util::StreamExt;
 use tokio::sync::mpsc;
 
 use super::FrameSize;
+use super::eis::{self, Eis};
 use super::stream::PipeWire;
 use crate::pointer::{self, PointerAction, ScrollAxis};
 use crate::{CaptureError, CaptureEvent, InputEvent, Options};
@@ -29,6 +30,8 @@ use crate::{CaptureError, CaptureEvent, InputEvent, Options};
 pub(super) struct Portal {
     remote: RemoteDesktop,
     session: Session<RemoteDesktop>,
+    /// Input through libei, when the portal offers it (COSMIC needs it).
+    eis: Option<Eis>,
 }
 
 /// The portal session behind a capture.
@@ -112,18 +115,19 @@ fn portal_error(error: ashpd::Error) -> CaptureError {
 /// Opens the portals and starts the session: screen and input when the desktop allows it,
 /// otherwise the screen alone (view-only, with a warning).
 pub(super) async fn open(options: &Options) -> Result<Opened, CaptureError> {
+    if options.view_only {
+        // Never hold an input capability that won't be used.
+        return open_screen_only(options).await;
+    }
     match open_full(options).await {
         Err(
-            CaptureError::PortalMissing {
+            error @ (CaptureError::PortalMissing {
                 portal: "RemoteDesktop",
-                desktop,
+                ..
             }
-            | CaptureError::DevicesUnavailable { desktop },
+            | CaptureError::DevicesUnavailable { .. }),
         ) => {
-            tracing::warn!(
-                "{desktop}'s portal can't let apps control the keyboard and mouse; \
-                 sharing the screen view-only"
-            );
+            tracing::warn!("{error}; sharing the screen view-only");
             open_screen_only(options).await
         }
         other => other,
@@ -150,20 +154,61 @@ async fn open_full(options: &Options) -> Result<Opened, CaptureError> {
         .create_session(CreateSessionOptions::default())
         .await
         .map_err(portal_error)?;
-    let portal = Portal { remote, session };
+    let mut portal = Portal {
+        remote,
+        session,
+        eis: None,
+    };
     match portal.negotiate(&screencast, options, cursor_mode).await {
-        Ok((negotiated, pipewire_fd)) => Ok(Opened {
-            portal: Sharing::Full(portal),
-            pipewire_fd,
-            node_id: negotiated.node_id,
-            logical_size: negotiated.logical_size,
-            restore_token: negotiated.restore_token,
-        }),
+        Ok((negotiated, pipewire_fd)) => {
+            match connect_eis(&portal, negotiated.mapping_id.clone()).await {
+                Ok(eis) => portal.eis = eis,
+                Err(error) => {
+                    // After ConnectToEIS the portal refuses its D-Bus input
+                    // calls: without libei this session can't take input.
+                    tracing::warn!("{error}");
+                    Sharing::Full(portal).close().await;
+                    return Err(CaptureError::DevicesUnavailable {
+                        desktop: desktop_name(),
+                    });
+                }
+            }
+            Ok(Opened {
+                portal: Sharing::Full(portal),
+                pipewire_fd,
+                node_id: negotiated.node_id,
+                logical_size: negotiated.logical_size,
+                restore_token: negotiated.restore_token,
+            })
+        }
         Err(error) => {
             Sharing::Full(portal).close().await;
             Err(error)
         }
     }
+}
+
+/// Input through libei if the portal offers `ConnectToEIS` (RemoteDesktop
+/// version 2): `Ok(None)` means it doesn't, and the per-event D-Bus calls
+/// are used; an error means libei was offered but failed.
+async fn connect_eis(
+    portal: &Portal,
+    mapping_id: Option<String>,
+) -> Result<Option<Eis>, CaptureError> {
+    let fd = match portal
+        .remote
+        .connect_to_eis(&portal.session, ConnectToEISOptions::default())
+        .await
+    {
+        Ok(fd) => fd,
+        Err(error) => {
+            tracing::debug!("no libei from the portal ({error}); using its input calls");
+            return Ok(None);
+        }
+    };
+    let eis = eis::connect(fd, mapping_id).await?;
+    tracing::info!("remote input goes through libei");
+    Ok(Some(eis))
 }
 
 /// The ScreenCast portal and the best cursor mode it offers.
@@ -220,6 +265,7 @@ async fn open_screen_only(options: &Options) -> Result<Opened, CaptureError> {
             node_id: stream.pipe_wire_node_id(),
             logical_size: logical_size.filter(|&(w, h)| w > 0 && h > 0),
             restore_token: selected.restore_token().map(str::to_owned),
+            mapping_id: stream.mapping_id().map(str::to_owned),
         };
         let fd = screencast
             .open_pipe_wire_remote(&session, OpenPipeWireRemoteOptions::default())
@@ -247,6 +293,8 @@ struct Negotiated {
     node_id: u32,
     logical_size: Option<(u32, u32)>,
     restore_token: Option<String>,
+    /// Matches the stream to its screen region in libei.
+    mapping_id: Option<String>,
 }
 
 impl Portal {
@@ -304,6 +352,7 @@ impl Portal {
             node_id: stream.pipe_wire_node_id(),
             logical_size: logical_size.filter(|&(w, h)| w > 0 && h > 0),
             restore_token: selected.restore_token().map(str::to_owned),
+            mapping_id: stream.mapping_id().map(str::to_owned),
         };
         let fd = screencast
             .open_pipe_wire_remote(&self.session, OpenPipeWireRemoteOptions::default())
@@ -324,10 +373,16 @@ struct Injector {
     /// viewer disappears (else they stay held on the user's own desktop).
     held_keysyms: std::collections::HashSet<i32>,
     held_codes: std::collections::HashSet<u16>,
+    /// Shift/AltGr keysyms the viewer holds (libei adds them itself otherwise).
+    held_modifiers: std::collections::HashSet<u32>,
 }
 
 impl Injector {
     async fn inject(&mut self, portal: &Portal, event: InputEvent) -> Result<(), ashpd::Error> {
+        if let Some(eis) = &portal.eis {
+            self.inject_eis(eis, event);
+            return Ok(());
+        }
         match event {
             InputEvent::Key { down, keysym } => {
                 let Ok(keysym) = i32::try_from(keysym) else {
@@ -417,6 +472,70 @@ impl Injector {
         }
     }
 
+    /// The same input through libei (no D-Bus round trips).
+    fn inject_eis(&mut self, eis: &Eis, event: InputEvent) {
+        match event {
+            InputEvent::Key { down, keysym } => {
+                if let Ok(held) = i32::try_from(keysym) {
+                    if down {
+                        self.held_keysyms.insert(held);
+                    } else {
+                        self.held_keysyms.remove(&held);
+                    }
+                }
+                if eis::is_modifier(keysym) {
+                    if down {
+                        self.held_modifiers.insert(keysym);
+                    } else {
+                        self.held_modifiers.remove(&keysym);
+                    }
+                }
+                eis.key_sym(keysym, down, &self.held_modifiers);
+            }
+            InputEvent::KeyCode { down, evdev } => {
+                if down {
+                    self.held_codes.insert(evdev);
+                } else {
+                    self.held_codes.remove(&evdev);
+                }
+                eis.key_code(u32::from(evdev), down);
+            }
+            InputEvent::ReleaseAll => {
+                for keysym in std::mem::take(&mut self.held_keysyms) {
+                    if let Ok(keysym) = u32::try_from(keysym) {
+                        eis.key_sym(keysym, false, &self.held_modifiers);
+                    }
+                }
+                self.held_modifiers.clear();
+                for evdev in std::mem::take(&mut self.held_codes) {
+                    eis.key_code(u32::from(evdev), false);
+                }
+                let previous = std::mem::take(&mut self.buttons);
+                for action in pointer::actions(previous, 0) {
+                    Self::act_eis(eis, action);
+                }
+            }
+            InputEvent::Pointer { buttons, x, y } => {
+                if self.position != Some((x, y)) {
+                    self.position = Some((x, y));
+                    let (frame_w, frame_h) = self.frame_size.get();
+                    eis.move_to(fraction(x, frame_w), fraction(y, frame_h));
+                }
+                let previous = std::mem::replace(&mut self.buttons, buttons);
+                for action in pointer::actions(previous, buttons) {
+                    Self::act_eis(eis, action);
+                }
+            }
+        }
+    }
+
+    fn act_eis(eis: &Eis, action: PointerAction) {
+        match action {
+            PointerAction::Button { code, pressed } => eis.button(code, pressed),
+            PointerAction::Scroll { axis, steps } => eis.scroll(axis, steps),
+        }
+    }
+
     async fn move_to(&self, portal: &Portal, x: u16, y: u16) -> Result<(), ashpd::Error> {
         let (frame_w, frame_h) = self.frame_size.get();
         let (to_w, to_h) = self.logical_size.unwrap_or((frame_w, frame_h));
@@ -469,6 +588,15 @@ impl Injector {
     }
 }
 
+/// `value` as a fraction (0–1) of a `size`-pixel axis.
+fn fraction(value: u16, size: u32) -> f32 {
+    if size <= 1 {
+        return 0.0;
+    }
+    let last = u16::try_from(size - 1).unwrap_or(u16::MAX);
+    f32::from(value) / f32::from(last)
+}
+
 /// Why the supervisor stopped.
 enum Stop {
     /// The caller dropped the event receiver.
@@ -477,6 +605,8 @@ enum Stop {
     PipeWireEnded(Option<String>),
     /// The desktop closed the portal session (e.g. the person stopped sharing).
     PortalClosed,
+    /// The desktop ended remote input (the libei connection closed).
+    InputEnded,
 }
 
 /// Everything the supervisor owns.
@@ -512,6 +642,7 @@ impl Supervisor {
             position: None,
             held_keysyms: std::collections::HashSet::new(),
             held_codes: std::collections::HashSet::new(),
+            held_modifiers: std::collections::HashSet::new(),
         };
         let session_closed = portal.closed();
         let mut session_closed = std::pin::pin!(session_closed);
@@ -522,11 +653,14 @@ impl Supervisor {
                 event = input.recv(), if input_open => match event {
                     Some(event) => {
                         // Screen-only sessions can't inject: input is dropped.
-                        if let Sharing::Full(full) = &portal
-                            && let Err(error) = injector.inject(full, event).await
-                        {
-                            // The error text never includes the event (it may be a keystroke).
-                            tracing::debug!("the portal rejected an input event: {error}");
+                        if let Sharing::Full(full) = &portal {
+                            if let Err(error) = injector.inject(full, event).await {
+                                // The error text never includes the event (it may be a keystroke).
+                                tracing::debug!("the portal rejected an input event: {error}");
+                            }
+                            if full.eis.as_ref().is_some_and(Eis::closed) {
+                                break Stop::InputEnded;
+                            }
                         }
                     }
                     None => input_open = false,
@@ -541,12 +675,19 @@ impl Supervisor {
             Stop::PipeWireEnded(reason) => {
                 Some(reason.unwrap_or_else(|| "the screen stream ended".to_owned()))
             }
-            Stop::ReceiverGone | Stop::PortalClosed => {
+            Stop::ReceiverGone | Stop::PortalClosed | Stop::InputEnded => {
                 let _ = quit.send(());
                 // Wait for the thread so no frame can follow the Closed event.
                 let _ = done.await;
-                matches!(stop, Stop::PortalClosed)
-                    .then(|| "screen sharing was stopped at the remote desktop".to_owned())
+                match stop {
+                    Stop::PortalClosed => {
+                        Some("screen sharing was stopped at the remote desktop".to_owned())
+                    }
+                    Stop::InputEnded => {
+                        Some("the desktop stopped accepting remote input".to_owned())
+                    }
+                    _ => None,
+                }
             }
         };
         portal.close().await;

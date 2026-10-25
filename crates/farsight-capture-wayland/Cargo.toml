@@ -20,6 +20,10 @@ farsight-gpu-sys = { workspace = true, optional = true }
 ashpd.workspace = true
 pipewire.workspace = true
 futures-util.workspace = true
+# libei input (COSMIC's RemoteDesktop portal only takes input this way); pure Rust.
+reis = { version = "0.7", features = ["tokio"] }
+# The compositor's keymap, to find the key for each keysym viewers send.
+xkbcommon = { version = "0.8", default-features = false }
 
 [features]
 # Accept the screen as a DMA-BUF (GPU buffer) when the compositor offers one

@@ -36,9 +36,16 @@ use tracing::{info, warn};
 
 use crate::capture::{Capture, Event, Input};
 
-/// Time a viewer has from connecting to being let in (or asked about),
-/// TLS handshake included.
-const HANDSHAKE_DEADLINE: Duration = Duration::from_secs(15);
+/// Time a viewer's software has, from connecting, to pick a security type
+/// (machine-speed steps only).
+const PROTOCOL_DEADLINE: Duration = Duration::from_secs(15);
+/// Time from connecting to being let in (or asked about) once a security
+/// type is chosen: the person at the viewer may be checking a fingerprint
+/// or typing a password (15 s cut people off mid-typing). Slow logins still
+/// can't pile up: at most 8 are pending, 2 per address.
+const LOGIN_DEADLINE: Duration = Duration::from_secs(120);
+// Regression (user feedback, v0.5.0): a person must have time to sign in.
+const _: () = assert!(LOGIN_DEADLINE.as_secs() >= 60);
 /// Time any single write may take before the viewer is dropped.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Fewest milliseconds between two resizes of a headless desktop: dragging a
@@ -105,6 +112,15 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 fn millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// How long a viewer may take to log in, counted from connecting.
+fn login_deadline(session: &ServerSession) -> Duration {
+    if session.security_chosen() {
+        LOGIN_DEADLINE
+    } else {
+        PROTOCOL_DEADLINE
+    }
 }
 
 /// Writes with a timeout, so a viewer that stops reading can't hold its slot.
@@ -347,20 +363,22 @@ impl Agent {
         let mut desktop_changes = self.version.subscribe();
         let mut clipboard = self.clipboard.subscribe();
         let (approval_tx, mut approval) = mpsc::channel::<bool>(1);
-        let deadline = tokio::time::Instant::now() + HANDSHAKE_DEADLINE;
+        let started = tokio::time::Instant::now();
         let mut buf = vec![0u8; 64 * 1024];
         write(&mut transport, &session.take_output()).await?;
         loop {
             // The deadline applies until the viewer is in or waiting for a decision.
             let handshaking = !session.is_connected() && !session.awaiting_decision();
+            let deadline = started + login_deadline(&session);
             let events = tokio::select! {
                 read = transport.read(&mut buf) => {
                     let Some(bytes) = read? else { return Ok(()) };
                     session.receive(&bytes);
-                    self.poll(&mut session, &mut transport, peer.ip(), deadline).await?
+                    self.poll(&mut session, &mut transport, peer.ip(), started).await?
                 }
                 () = tokio::time::sleep_until(deadline), if handshaking => {
-                    return Err(anyhow!("the viewer did not finish logging in within {}s", HANDSHAKE_DEADLINE.as_secs()));
+                    let limit = login_deadline(&session).as_secs();
+                    return Err(anyhow!("the viewer did not finish logging in within {limit}s"));
                 }
                 changed = desktop_changes.changed(), if session.is_connected() => {
                     changed?;
@@ -412,7 +430,7 @@ impl Agent {
         session: &mut ServerSession,
         transport: &mut Transport,
         ip: IpAddr,
-        deadline: tokio::time::Instant,
+        started: tokio::time::Instant,
     ) -> Result<Vec<SessionEvent>> {
         let mut out = Vec::new();
         loop {
@@ -443,8 +461,10 @@ impl Agent {
                         write(transport, &session.take_output()).await?;
                         match upgrade {
                             TransportUpgrade::Tls => {
+                                // A security type is chosen by now: the viewer
+                                // may be showing its fingerprint to a person.
                                 tokio::time::timeout_at(
-                                    deadline,
+                                    started + LOGIN_DEADLINE,
                                     transport.accept_tls(&self.settings.tls),
                                 )
                                 .await

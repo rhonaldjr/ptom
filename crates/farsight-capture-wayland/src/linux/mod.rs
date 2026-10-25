@@ -1,5 +1,6 @@
 //! The Linux implementation: portal session plus PipeWire stream.
 
+mod eis;
 mod portal;
 mod stream;
 

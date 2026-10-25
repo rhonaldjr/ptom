@@ -344,6 +344,7 @@ fn headless_setup(
         } else {
             None
         },
+        view_only: options.view_only,
     })
 }
 

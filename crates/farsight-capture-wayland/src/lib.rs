@@ -64,6 +64,8 @@ pub struct Options {
     pub restore_token: Option<String>,
     /// Ask the portal for a token that stays valid until the person revokes it.
     pub persist: bool,
+    /// Only share the screen: never ask for (or hold) input control.
+    pub view_only: bool,
 }
 
 /// A running capture.
@@ -246,6 +248,7 @@ mod tests {
         let started = start(Options {
             restore_token: None,
             persist: true,
+            view_only: false,
         })
         .await
         .unwrap();

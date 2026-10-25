@@ -82,6 +82,17 @@ pub struct ServerConnection {
 }
 
 impl ServerConnection {
+    /// Whether the viewer has picked a security type. From then on, the
+    /// handshake may wait for the person at the viewer (checking a
+    /// fingerprint, typing a password); before it, only for their software.
+    #[must_use]
+    pub fn security_chosen(&self) -> bool {
+        !matches!(
+            self.phase,
+            Phase::AwaitVersion | Phase::AwaitSecuritySelection | Phase::Closed
+        )
+    }
+
     /// Starts a connection and queues the server's version message.
     #[must_use]
     pub fn new(config: ServerConfig) -> Self {
@@ -425,6 +436,25 @@ mod tests {
         ) -> Result<(usize, AuthProgress), AuthError> {
             Ok((0, AuthProgress::UpgradeTransport(TransportUpgrade::Tls)))
         }
+    }
+
+    #[test]
+    fn security_counts_as_chosen_once_the_viewer_picks_a_type() {
+        let mut server = ServerConnection::new(ServerConfig {
+            max_version: ProtocolVersion::V3_8,
+            security_types: vec![SecurityType::VeNCrypt],
+            limits: Limits::DEFAULT,
+        });
+        assert!(!server.security_chosen());
+        server.receive(&ProtocolVersion::V3_8.to_bytes());
+        let _ = server.poll();
+        assert!(
+            !server.security_chosen(),
+            "the version alone isn't a choice"
+        );
+        server.receive(&[SecurityType::VeNCrypt.code()]);
+        let _ = server.poll();
+        assert!(server.security_chosen());
     }
 
     #[test]

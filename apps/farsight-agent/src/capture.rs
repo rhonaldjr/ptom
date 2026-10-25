@@ -115,6 +115,10 @@ pub struct HeadlessSetup {
     pub height: u16,
     pub display: Option<u32>,
     pub startup: Option<std::path::PathBuf>,
+    /// The agent runs view-only (`--view-only`): live Wayland sharing then
+    /// never asks for input control.
+    #[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+    pub view_only: bool,
 }
 
 /// Starts the backend for `backend` (already resolved from `Auto`).
@@ -129,7 +133,7 @@ pub async fn start(
         Backend::X11 | Backend::Auto => start_x11(headless.x11_display),
         Backend::Headless => start_headless(headless),
         #[cfg(feature = "wayland")]
-        Backend::Wayland => start_wayland(token_file).await,
+        Backend::Wayland => start_wayland(token_file, headless.view_only).await,
         #[cfg(not(feature = "wayland"))]
         Backend::Wayland => {
             let _ = token_file;
@@ -139,7 +143,7 @@ pub async fn start(
 }
 
 #[cfg(feature = "wayland")]
-async fn start_wayland(token_file: &Path) -> Result<Capture> {
+async fn start_wayland(token_file: &Path, view_only: bool) -> Result<Capture> {
     use farsight_capture_wayland::{CaptureEvent, Options, start};
     let restore_token = std::fs::read_to_string(token_file)
         .ok()
@@ -147,6 +151,7 @@ async fn start_wayland(token_file: &Path) -> Result<Capture> {
     let started = start(Options {
         restore_token,
         persist: true,
+        view_only,
     })
     .await
     .context("could not share the Wayland session")?;

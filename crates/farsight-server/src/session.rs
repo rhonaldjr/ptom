@@ -326,6 +326,14 @@ impl ServerSession {
         self.stage == Stage::Connected
     }
 
+    /// Whether the viewer has picked a security type (see
+    /// [`ServerConnection::security_chosen`]): the agent then allows people
+    /// time to check fingerprints and type passwords.
+    #[must_use]
+    pub fn security_chosen(&self) -> bool {
+        self.connection.security_chosen()
+    }
+
     /// Whether the session ended; close the connection after flushing output.
     #[must_use]
     pub fn is_closed(&self) -> bool {
