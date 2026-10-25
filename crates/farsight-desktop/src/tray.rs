@@ -111,8 +111,8 @@ impl ksni::Tray for ViewerTrayIcon {
         "Farsight".into()
     }
 
-    fn icon_name(&self) -> String {
-        "video-display".into()
+    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+        crate::icons::pixmaps(crate::icons::Logo::Viewer)
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {

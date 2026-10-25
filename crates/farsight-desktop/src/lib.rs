@@ -5,6 +5,8 @@
 //!
 //! Layer: **Adapters** (ADR-0002).
 
+#[cfg(target_os = "linux")]
+mod icons;
 pub mod notify;
 pub mod presence;
 pub mod tray;

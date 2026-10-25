@@ -15,6 +15,15 @@ mkdir -p "$out"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# install_icon <package dir> <app id>: the logo at every size (scripts/render-icons.sh).
+install_icon() {
+  local icons="$1/usr/share/icons/hicolor" id="$2" png
+  install -D -m 0644 "$root/dist/icons/$id.svg" "$icons/scalable/apps/$id.svg"
+  for png in "$root"/dist/icons/hicolor/*/apps/"$id.png"; do
+    install -D -m 0644 "$png" "$icons/${png#"$root/dist/icons/hicolor/"}"
+  done
+}
+
 # package <name> <summary> <description> <extra-depends> <bin>...
 package() {
   local name="$1" summary="$2" description="$3" extra="$4"
@@ -27,23 +36,40 @@ package() {
   case "$name" in
     farsight)
       install -d "$dir/usr/share/applications"
-      cat > "$dir/usr/share/applications/farsight.desktop" <<EOF
+      install_icon "$dir" ca.akrotechnologies.Farsight
+      # Named after the app id, which desktops use to match windows to entries.
+      cat > "$dir/usr/share/applications/ca.akrotechnologies.Farsight.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Farsight
 GenericName=Remote Desktop Viewer
 Comment=View and control other computers
-Exec=farsight
-Icon=video-display
+Exec=/usr/bin/farsight
+Icon=ca.akrotechnologies.Farsight
 Terminal=false
+StartupWMClass=ca.akrotechnologies.Farsight
 Categories=Network;RemoteAccess;
-Keywords=VNC;remote;desktop;viewer;
+Keywords=VNC;remote;desktop;viewer;TigerVNC;
 EOF
       ;;
     farsight-agent)
-      install -d "$dir/usr/lib/systemd/user"
+      install -d "$dir/usr/lib/systemd/user" "$dir/usr/share/applications"
       install -m 0644 "$root/dist/systemd/farsight-agent.service" "$root/dist/systemd/farsight-headless@.service" \
         "$root/dist/systemd/farsight-headless@.socket" "$dir/usr/lib/systemd/user/"
+      install_icon "$dir" ca.akrotechnologies.FarsightSharing
+      cat > "$dir/usr/share/applications/ca.akrotechnologies.FarsightSharing.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Farsight Sharing
+GenericName=Desktop Sharing
+Comment=Let other computers view and control this one
+Exec=/usr/bin/farsight-sharing
+Icon=ca.akrotechnologies.FarsightSharing
+Terminal=false
+StartupWMClass=ca.akrotechnologies.FarsightSharing
+Categories=Network;RemoteAccess;
+Keywords=VNC;share;remote;desktop;server;
+EOF
       ;;
   esac
 
@@ -79,7 +105,8 @@ package farsight "Farsight remote desktop viewer (VNC)" \
   "libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libwayland-egl1, libvulkan1 | libegl1, fonts-dejavu-core | fonts-noto-core" farsight
 package farsight-agent "Farsight desktop sharing agent (VNC server)" \
   "Shares your live X11 or Wayland desktop over VNC, encrypted, with approval prompts. Replaces x0vncserver and vncpasswd." \
-  "xdg-desktop-portal, xkb-data" farsight-agent farsight-passwd
+  "xdg-desktop-portal, xkb-data, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libwayland-egl1, libvulkan1 | libegl1, fonts-dejavu-core | fonts-noto-core" \
+  farsight-agent farsight-passwd farsight-sharing
 
 # Optional TigerVNC compatibility names (U-11): symlinks only. It conflicts
 # with the packages that own these names, so it never silently shadows them.

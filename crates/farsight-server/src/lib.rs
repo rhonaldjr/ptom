@@ -26,6 +26,7 @@ pub mod ports;
 mod security;
 mod select;
 mod session;
+pub mod settings;
 mod update;
 
 pub use access::{AccessControl, AccessPolicy, Admission, ConnectionId, Refusal, SharePolicy};

@@ -41,7 +41,7 @@ fn main() -> ExitCode {
     let program = args.first().cloned().unwrap_or_default();
     let rest = args.get(1..).unwrap_or_default();
     let options = match compat::Personality::from_program(&program) {
-        compat::Personality::Farsight => Command::parse(rest.iter().cloned()),
+        compat::Personality::Farsight => options::parse_farsight(settings_file_defaults, rest),
         compat::Personality::Vncserver => {
             let defaults = compat::vncserver_config(&vncserver::config_file());
             let mandatory = compat::mandatory_listen(&vncserver::mandatory_config_file());
@@ -448,4 +448,25 @@ fn host_name() -> String {
         .map(|h| h.trim().to_owned())
         .filter(|h| !h.is_empty())
         .unwrap_or_else(|| "farsight".into())
+}
+
+/// Defaults from `~/.config/farsight/agent/settings` (written by the
+/// Farsight Sharing app); missing or unreadable means the built-in ones.
+/// The live desktop's defaults from the Farsight Sharing settings file.
+/// Network access chosen there is logged, so it never goes unnoticed.
+fn settings_file_defaults() -> AgentOptions {
+    let Some(path) = Identity::default_dir().ok().map(|dir| dir.join("settings")) else {
+        return AgentOptions::default();
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return AgentOptions::default();
+    };
+    let defaults = options::settings_defaults(&text);
+    if defaults.listen == Listen::Lan {
+        info!(
+            "{}: listen = lan, so computers on the network may connect",
+            path.display()
+        );
+    }
+    defaults
 }

@@ -9,7 +9,8 @@
 # Your apps come from ~/.config/farsight/headless-startup (created the first time).
 # To allow connections from your network: systemctl --user edit farsight-headless@5901
 # and add `--listen lan` to ExecStart (with the .socket, replace its ListenStream;
-# the agent accepts exactly one socket).
+# the agent accepts exactly one socket). The Farsight Sharing app's settings
+# apply to the live desktop only, never to headless desktops.
 [Unit]
 Description=Farsight headless desktop on port %i
 Documentation=https://github.com/rhonaldjr/ptom

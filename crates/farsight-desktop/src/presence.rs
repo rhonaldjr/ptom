@@ -21,12 +21,13 @@ impl ksni::Tray for PresenceTray {
         "Farsight screen sharing".into()
     }
 
-    fn icon_name(&self) -> String {
-        if self.viewers.is_empty() {
-            "video-display".into()
+    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+        let logo = if self.viewers.is_empty() {
+            crate::icons::Logo::Sharing
         } else {
-            "media-record".into()
-        }
+            crate::icons::Logo::SharingActive
+        };
+        crate::icons::pixmaps(logo)
     }
 
     fn status(&self) -> ksni::Status {

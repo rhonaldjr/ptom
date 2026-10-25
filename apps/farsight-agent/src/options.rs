@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use farsight_server::settings::{Reach, SharingSettings};
+
 /// Where the desktop comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
@@ -117,8 +119,18 @@ Shares this desktop with Farsight and other VNC viewers.
 
 impl Command {
     /// Parses arguments (without the program name).
+    #[cfg(test)]
     pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Self, UsageError> {
-        let mut o = AgentOptions::default();
+        Self::parse_with_defaults(AgentOptions::default(), args)
+    }
+
+    /// Like [`Self::parse`], starting from `defaults` (the settings file
+    /// the Farsight Sharing app writes); the command line wins.
+    pub fn parse_with_defaults<I: IntoIterator<Item = String>>(
+        defaults: AgentOptions,
+        args: I,
+    ) -> Result<Self, UsageError> {
+        let mut o = defaults;
         let mut port_given = false;
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
@@ -181,6 +193,34 @@ impl Command {
             }
         }
         Ok(Self::Run(o))
+    }
+}
+
+/// Agent defaults from the sharing settings file (format and rules in
+/// [`farsight_server::settings`]).
+pub fn settings_defaults(text: &str) -> AgentOptions {
+    let settings = SharingSettings::parse(text);
+    AgentOptions {
+        listen: match settings.reach {
+            Reach::ThisComputer => Listen::Loopback,
+            Reach::Network => Listen::Lan,
+        },
+        advertise: settings.announce,
+        view_only: settings.view_only,
+        ..AgentOptions::default()
+    }
+}
+
+/// Parses the `farsight-agent` command line. The settings file (`settings`,
+/// read only when needed) shapes the live desktop only: headless desktops
+/// keep their own secure defaults and are opened up per unit.
+pub fn parse_farsight(
+    settings: impl FnOnce() -> AgentOptions,
+    args: &[String],
+) -> Result<Command, UsageError> {
+    match Command::parse_with_defaults(AgentOptions::default(), args.iter().cloned())? {
+        Command::Run(o) if o.backend == Backend::Headless => Ok(Command::Run(o)),
+        _ => Command::parse_with_defaults(settings(), args.iter().cloned()),
     }
 }
 
@@ -250,6 +290,46 @@ mod tests {
         assert!(parse(&["--listen", "everywhere"]).is_err());
         assert!(parse(&["--port"]).is_err());
         assert_eq!(parse(&["--help"]), Ok(Command::Help));
+    }
+
+    #[test]
+    fn headless_desktops_ignore_the_sharing_settings() {
+        let lan = || settings_defaults("listen = lan\nview-only = yes");
+        let args = |list: &[&str]| list.iter().map(|&a| a.to_owned()).collect::<Vec<_>>();
+        let Ok(Command::Run(headless)) = parse_farsight(lan, &args(&["--backend", "headless"]))
+        else {
+            panic!("expected Run");
+        };
+        assert_eq!(
+            (headless.listen, headless.view_only),
+            (Listen::Loopback, false)
+        );
+        let Ok(Command::Run(live)) = parse_farsight(lan, &args(&[])) else {
+            panic!("expected Run");
+        };
+        assert_eq!((live.listen, live.view_only), (Listen::Lan, true));
+    }
+
+    #[test]
+    fn the_settings_file_gives_defaults_and_the_command_line_wins() {
+        let defaults = settings_defaults(
+            "# from Farsight Sharing\nlisten = lan\nannounce = no\nbogus\nview-only = yes\n",
+        );
+        assert_eq!(
+            (defaults.listen, defaults.advertise, defaults.view_only),
+            (Listen::Lan, false, true)
+        );
+        let Ok(Command::Run(o)) =
+            Command::parse_with_defaults(defaults, ["--listen=loopback".to_owned()])
+        else {
+            panic!("expected Run");
+        };
+        assert_eq!(o.listen, Listen::Loopback);
+        assert_eq!(
+            settings_defaults("listen = everywhere").listen,
+            Listen::Loopback,
+            "bad values keep the default"
+        );
     }
 
     #[test]

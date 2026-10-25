@@ -135,6 +135,10 @@ PLT-3, INP-3, INP-4, VWR-7, VWR-11, UTL-2, UTL-3, UTL-4
   needs toolkit support; P-49)
 - [x] KDE and Xfce certification rows and the macOS checklist in the [compatibility matrix](../testing/compatibility-matrix.md)
 - ⚠️ The hand checks in the matrix (KDE, Xfce, COSMIC live, macOS) are still to be done by a person.
+- [x] Fixes from the first install (user feedback, [P-50](../decisions/provisional.md)): the **Farsight Sharing** app
+  (sharing on/off, who can connect, mark this network, password, addresses and fingerprints); Farsight agents
+  listed first and labelled in the viewer; app-menu entries; the Farsight and Farsight Sharing logos (app menu, dock, tray, macOS `Farsight.app`);
+  clearer "Connection refused" message ([review](../reviews/2026-10-24-m9.1-sharing-review.md))
 
 ## M10: GPU paths and H.264 ⬜ Not started · [council](../council/2026-10-23-initial-roadmap.md#m10-gpu--h264)
 SRV-11, ENC-8

@@ -1,0 +1,27 @@
+[package]
+name = "farsight-sharing"
+description = "Farsight Sharing: turn sharing this computer on or off and see how to reach it"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+farsight-discovery.workspace = true
+farsight-server.workspace = true
+farsight-vault.workspace = true
+if-addrs = "0.15"
+libcosmic.workspace = true
+secrecy.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

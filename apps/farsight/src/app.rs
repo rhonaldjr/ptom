@@ -887,6 +887,7 @@ impl App {
             label,
             address,
             encryption,
+            farsight,
         } in entries
         {
             let security = match encryption {
@@ -906,7 +907,8 @@ impl App {
                 widget::Row::new()
                     .push(
                         widget::text::body(format!(
-                            "{name} — {} · identity not verified · {security}{}",
+                            "{}{name} — {} · identity not verified · {security}{}",
+                            if farsight { "Farsight agent · " } else { "" },
                             address.display_name(),
                             warning.as_deref().unwrap_or_default()
                         ))

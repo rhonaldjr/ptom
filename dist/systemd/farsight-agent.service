@@ -1,8 +1,10 @@
 # Farsight agent: shares your desktop session (ADR-0009, U-6).
-# Installed as a *user* unit and NOT enabled automatically. To turn it on:
+# Installed as a *user* unit and NOT enabled automatically. The easy way to
+# turn it on is the "Farsight Sharing" app; from a terminal:
 #   systemctl --user enable --now farsight-agent
-# To allow connections from your network, add `--listen lan` to ExecStart
-# with `systemctl --user edit farsight-agent`.
+# Defaults come from ~/.config/farsight/agent/settings (written by Farsight
+# Sharing: `listen = lan`, `announce = yes`, `view-only = no`); options
+# added to ExecStart with `systemctl --user edit` win over that file.
 [Unit]
 Description=Farsight desktop sharing agent
 Documentation=https://github.com/rhonaldjr/ptom

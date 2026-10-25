@@ -29,6 +29,8 @@ pub struct NearbyEntry {
     pub label: String,
     pub address: ServerAddress,
     pub encryption: Encryption,
+    /// It announced itself as a Farsight agent (`farsight=1` in its TXT record).
+    pub farsight: bool,
 }
 
 /// Progress of an active scan.
@@ -100,6 +102,7 @@ impl Nearby {
                     port: server.port,
                 },
                 encryption,
+                farsight: server.txt.farsight,
             };
             by_address
                 .entry((host, server.port))
@@ -110,10 +113,15 @@ impl Nearby {
                     if existing.label.is_empty() {
                         existing.label.clone_from(&entry.label);
                     }
+                    existing.farsight |= entry.farsight;
                 })
                 .or_insert(entry);
         }
-        by_address.into_values().collect()
+        // Farsight agents first: they're the ones that can be verified and
+        // encrypted out of the box.
+        let mut entries: Vec<NearbyEntry> = by_address.into_values().collect();
+        entries.sort_by_key(|e| !e.farsight);
+        entries
     }
 }
 

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Farsight Sharing: the Farsight eye, sending outwards. Green = sharing this computer. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2fd38b"/>
+      <stop offset="1" stop-color="#0d7a63"/>
+    </linearGradient>
+    <radialGradient id="iris" cx="0.4" cy="0.35" r="0.75">
+      <stop offset="0" stop-color="#8af5c4"/>
+      <stop offset="1" stop-color="#11946b"/>
+    </radialGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)"/>
+  <rect x="8" y="8" width="112" height="56" rx="26" fill="#ffffff" opacity="0.07"/>
+  <path d="M36 64 Q64 34 92 64 Q64 94 36 64 Z" fill="#ffffff"/>
+  <circle cx="64" cy="64" r="13" fill="url(#iris)"/>
+  <rect x="57" y="59" width="14" height="10" rx="3" fill="#06302a"/>
+  <circle cx="69.5" cy="56.5" r="3" fill="#ffffff"/>
+  <g fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round">
+    <path d="M29 48 Q21 64 29 80"/>
+    <path d="M99 48 Q107 64 99 80"/>
+  </g>
+  <g fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.6">
+    <path d="M20 40 Q8 64 20 88"/>
+    <path d="M108 40 Q120 64 108 88"/>
+  </g>
+</svg>

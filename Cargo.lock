@@ -2227,6 +2227,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "farsight-sharing"
+version = "0.0.0"
+dependencies = [
+ "farsight-discovery",
+ "farsight-server",
+ "farsight-vault",
+ "if-addrs",
+ "libcosmic",
+ "secrecy",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "zeroize",
+]
+
+[[package]]
 name = "farsight-vault"
 version = "0.0.0"
 dependencies = [

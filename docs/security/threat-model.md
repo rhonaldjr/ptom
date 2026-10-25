@@ -52,6 +52,7 @@ integrity · viewer host integrity · the local user's awareness that they are b
 | `vncserver -kill` signals the wrong process (stale pidfile, pid reuse) | Pidfiles in a checked 0700 runtime dir, created exclusively without following symlinks; the process must be this executable serving that display ([M9 review](../reviews/2026-10-24-m9-review.md)) | M9 ✅ |
 | Keys left held on the owner's session when a viewer drops (live desktops) | Every backend releases held keys and buttons when a viewer disconnects | M9 ✅ |
 | Root runs a compat name with a user's environment | Every personality refuses to run as root, first (ADR-0009) | M9 ✅ |
+| T1021.005 / T1219: something running as the user quietly opens sharing to the network via the Farsight Sharing settings file | The file only shapes the live desktop (headless desktops ignore it); unknown values keep loopback; written 0600 in a 0700 folder; the agent logs when `listen = lan` comes from it; network access still needs a password ([P-50](../decisions/provisional.md)) | M9.1 ✅ |
 | Supply-chain compromise | cargo-deny · provenance attestations · SHA-pinned actions | M0 |
 
 ## Accepted risks

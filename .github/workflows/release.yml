@@ -44,8 +44,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bins: "farsight farsight-agent farsight-passwd", tier: 1 }
-          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, bins: "farsight farsight-agent farsight-passwd", tier: 1 }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bins: "farsight farsight-agent farsight-passwd farsight-sharing", tier: 1 }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, bins: "farsight farsight-agent farsight-passwd farsight-sharing", tier: 1 }
           - { os: macos-latest, target: aarch64-apple-darwin, bins: "farsight farsight-passwd", tier: 2 }
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.tier == 2 }}
@@ -76,6 +76,7 @@ jobs:
           mkdir -p "dist/$name"
           for bin in $BINS; do cp "target/$TARGET/release/$bin" "dist/$name/"; done
           cp LICENSE README.md "dist/$name/"
+          if [ "$RUNNER_OS" = "macOS" ]; then scripts/macos-app.sh "$VERSION" "target/$TARGET/release/farsight" "dist/$name"; fi
           tar -C dist -czf "dist/$name.tar.gz" "$name"
       - name: Benchmarks (published with the release, M8)
         if: matrix.target == 'x86_64-unknown-linux-gnu'

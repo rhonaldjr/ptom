@@ -54,6 +54,7 @@ apps/              FRAMEWORKS & DRIVERS (composition roots only; thin)
   farsight             viewer (libcosmic)
   farsight-agent       agent daemon
   farsight-passwd      vncpasswd-compatible password tool
+  farsight-sharing     "Farsight Sharing" window for the agent (libcosmic)
 docs/              ALL documentation (see docs/README.md)
 fuzz/              cargo-fuzz targets for every parser (own workspace, nightly)
 .github/workflows  ci.yml (PR gate), release.yml (push to main → release)

@@ -119,8 +119,24 @@ pub enum ConnectError {
         source: std::io::Error,
     },
     /// No resolved address accepted a connection.
-    #[error("could not connect to {0}: {1}")]
+    #[error("could not connect to {0}: {1}.{hint}", hint = connect_hint(.1))]
     Connect(String, std::io::Error),
+}
+
+/// What a failed connection usually means, in plain words (user feedback:
+/// "Connection refused" alone didn't say what to do).
+fn connect_hint(error: &std::io::Error) -> &'static str {
+    use std::io::ErrorKind;
+    match error.kind() {
+        ErrorKind::ConnectionRefused => {
+            " Nothing there is accepting remote-desktop connections. If it's a Farsight computer, \
+             open Farsight Sharing on it, turn sharing on and choose \"Computers on my network\"."
+        }
+        ErrorKind::TimedOut | ErrorKind::HostUnreachable | ErrorKind::NetworkUnreachable => {
+            " The computer didn't answer: check that it's on and on the same network."
+        }
+        _ => "",
+    }
 }
 
 /// Sends commands to a running connection.

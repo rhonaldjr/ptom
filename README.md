@@ -67,7 +67,7 @@ sudo apt install ./farsight-agent_*_amd64.deb    # the agent (share this compute
 ```
 
 Use the `arm64` files on ARM computers. **Other Linux and macOS:** download the `.tar.gz` file for your system,
-unpack it, and run `farsight`. Fedora, Arch and Flatpak packages are planned.
+unpack it, and run `farsight`. On macOS, drag **Farsight.app** from the download into Applications. Fedora, Arch and Flatpak packages are planned.
 
 ## Use the viewer
 
@@ -77,7 +77,7 @@ farsight pop-os:1             # connects to display 1 on the computer "pop-os"
 farsight -ViewOnly pop-os:1   # watch without controlling
 ```
 
-- Each computer opens in its own **tab**. The **Home** tab lists your computers and the ones on your network.
+- Find **Farsight** in your app menu, or run `farsight`. Each computer opens in its own **tab**. The **Home** tab lists your computers and the ones on your network.
 - Press **F8** for the viewer menu: full screen, view only, Ctrl+Alt+Del, **Move to new window**, disconnect.
 - The **tray icon** (COSMIC, KDE, Pop!_OS GNOME, Xfce) gives quick access to open sessions and saved computers.
   Desktops without a tray, such as vanilla GNOME, have everything in the window.
@@ -94,18 +94,32 @@ farsight -ViewOnly pop-os:1   # watch without controlling
 
 ## Share this computer (the agent)
 
+After installing `farsight-agent`, open **Farsight Sharing** from your app menu. In it:
+
+1. Set a **password** (you'll type it in the viewer on the other computer).
+2. Turn **sharing on**.
+3. Under **Who can connect**, choose **Computers on my network**. Network connections are always encrypted.
+4. At home or at work, click **This is my network** so viewers there can find this computer by itself.
+   It's never announced on networks you haven't marked, like café Wi-Fi.
+
+The window also shows this computer's **addresses** (type one into the viewer) and its **fingerprints**
+(the viewer asks you to check one the first time). In the viewer, Farsight computers are listed first
+and marked **Farsight agent**.
+
+Prefer the terminal?
+
 ```bash
 farsight-passwd user add $USER                  # your password for connecting from other computers
 farsight-agent --show-identity                  # the fingerprints viewers will ask you to check
+farsight-agent --trust-this-network             # let viewers on this network find this computer
 systemctl --user enable --now farsight-agent    # start sharing now and at every login
 ```
 
-- To let viewers find this computer automatically at home, run `farsight-agent --trust-this-network` once while on your
-  home network. The agent announces itself only on networks you've marked this way, never on café or office Wi-Fi.
+- Settings chosen in Farsight Sharing are kept in `~/.config/farsight/agent/settings`
+  (`listen = lan`, `announce = yes`, `view-only = no`).
 - After changing passwords with `farsight-passwd`, `systemctl --user reload farsight-agent` applies them without
   disconnecting anyone.
-- By default only this computer can connect. To allow your network, run
-  `systemctl --user edit farsight-agent` and add `--listen lan` to the command. Network connections are always encrypted.
+- If the viewer says **Connection refused**, sharing is off on that computer or set to "Only this computer".
 - On Wayland, your desktop asks once whether Farsight may share the screen. Farsight remembers the answer;
   `farsight-agent --forget-portal-approval` forgets it.
 - When **you** connect with your own account, you get straight in. Anyone else has to be approved by whoever is at the
