@@ -79,7 +79,7 @@ libloading = "0.8"
 # systemd socket activation for headless desktops (M7).
 listenfd = "1"
 # Pure-Rust X11 protocol (no Xlib, no libxcb); used by farsight-capture-x11.
-x11rb = { version = "0.13", features = ["damage", "xfixes", "xtest", "shm", "randr"] }
+x11rb = { version = "0.14", features = ["damage", "xfixes", "xtest", "shm", "randr"] }
 thiserror = "2"
 des = "0.8"
 aes = "0.8"
