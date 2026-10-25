@@ -45,6 +45,7 @@ pub(crate) async fn start(options: Options) -> Result<Started, CaptureError> {
         opened.node_id,
         events_tx.clone(),
         Arc::clone(&frame_size),
+        opened.logical_size,
     )
     .await
     {

@@ -157,6 +157,8 @@ SRV-11, ENC-8
 - [x] Control on COSMIC (user feedback, P-58): mouse and keyboard through libei when the desktop's portal offers it
   (COSMIC 1.6+, GNOME 46+), and two minutes to type a username and password instead of 15 seconds
   ([review](../reviews/2026-10-25-m10.2-libei-review.md))
+- [x] No restart loops (user feedback, P-59): the sharing dialog appears once per start, sharing keeps going view-only if
+  remote input ends, live updates on scaled screens, and no network scanning while viewing a computer
 - ⚠️ Still to do by hand before the features go into release builds (U-14): NVENC on the NVIDIA machine, DMA-BUF
   on a Wayland desktop, and a real session with each ([charter](../testing/charters/2026-10-25-gpu-h264.md))
 

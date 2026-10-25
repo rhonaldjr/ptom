@@ -605,8 +605,6 @@ enum Stop {
     PipeWireEnded(Option<String>),
     /// The desktop closed the portal session (e.g. the person stopped sharing).
     PortalClosed,
-    /// The desktop ended remote input (the libei connection closed).
-    InputEnded,
 }
 
 /// Everything the supervisor owns.
@@ -647,6 +645,7 @@ impl Supervisor {
         let session_closed = portal.closed();
         let mut session_closed = std::pin::pin!(session_closed);
         let mut input_open = true;
+        let mut input_lost = false;
 
         let stop = loop {
             tokio::select! {
@@ -658,8 +657,14 @@ impl Supervisor {
                                 // The error text never includes the event (it may be a keystroke).
                                 tracing::debug!("the portal rejected an input event: {error}");
                             }
-                            if full.eis.as_ref().is_some_and(Eis::closed) {
-                                break Stop::InputEnded;
+                            if !input_lost && full.eis.as_ref().is_some_and(Eis::closed) {
+                                // Keep sharing the screen: ending the capture
+                                // would restart the agent into a new dialog.
+                                tracing::warn!(
+                                    "the desktop stopped accepting remote input; \
+                                     viewers can watch but not control"
+                                );
+                                input_lost = true;
                             }
                         }
                     }
@@ -671,20 +676,18 @@ impl Supervisor {
             }
         };
 
+        let by_person = matches!(stop, Stop::PortalClosed);
         let reason = match stop {
             Stop::PipeWireEnded(reason) => {
                 Some(reason.unwrap_or_else(|| "the screen stream ended".to_owned()))
             }
-            Stop::ReceiverGone | Stop::PortalClosed | Stop::InputEnded => {
+            Stop::ReceiverGone | Stop::PortalClosed => {
                 let _ = quit.send(());
                 // Wait for the thread so no frame can follow the Closed event.
                 let _ = done.await;
                 match stop {
                     Stop::PortalClosed => {
                         Some("screen sharing was stopped at the remote desktop".to_owned())
-                    }
-                    Stop::InputEnded => {
-                        Some("the desktop stopped accepting remote input".to_owned())
                     }
                     _ => None,
                 }
@@ -693,7 +696,12 @@ impl Supervisor {
         portal.close().await;
         if let Some(reason) = reason {
             tracing::info!("Wayland capture closed: {reason}");
-            let _ = events.send(CaptureEvent::Closed(reason)).await;
+            let event = if by_person {
+                CaptureEvent::Stopped(reason)
+            } else {
+                CaptureEvent::Closed(reason)
+            };
+            let _ = events.send(event).await;
         }
     }
 }

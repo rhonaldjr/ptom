@@ -190,18 +190,24 @@ fn problem() -> Option<String> {
     Some(last_error(&log).unwrap_or_else(|| "The agent isn't running.".into()))
 }
 
-/// The agent's last error from its log (colour codes removed), or its last
-/// line.
+/// The agent's mark for a deliberate stop (see `farsight-agent`'s runtime).
+const STOPPED_TAG: &str = "stopped:";
+
+/// Why the agent last stopped, from its log (colour codes removed): its
+/// "stopped:" note (a deliberate stop) or its last error, whichever came
+/// last; else its last line.
 fn last_error(log: &str) -> Option<String> {
     let lines: Vec<String> = log
         .lines()
         .map(strip_colours)
         .filter(|l| !l.trim().is_empty())
         .collect();
-    lines
+    let is_error = |l: &String| l.contains("Error") || l.contains("error") || l.contains("ERROR");
+    let latest = lines
         .iter()
-        .rev()
-        .find(|l| l.contains("Error") || l.contains("error") || l.contains("ERROR"))
+        .rposition(|l| l.contains(STOPPED_TAG) || is_error(l));
+    latest
+        .and_then(|i| lines.get(i))
         .or_else(|| lines.last())
         .map(|l| l.trim().to_owned())
 }
@@ -236,6 +242,8 @@ fn strip_colours(line: &str) -> String {
 pub fn set_sharing(sharing: Sharing) -> Result<String, String> {
     let on = sharing == Sharing::On;
     let verb = if on { "enable" } else { "disable" };
+    // Starts the user asks for never count against systemd's restart limit.
+    let _ = systemctl(&["reset-failed", UNIT]);
     run("systemctl", &["--user", verb, "--now", UNIT])?;
     if on {
         std::thread::sleep(START_CHECK);
@@ -256,6 +264,7 @@ pub fn save_settings(settings: SharingSettings) -> Result<String, String> {
     let dir = agent_dir().ok_or("no config folder")?;
     write_private(&dir, "settings", &settings.render()).map_err(|e| e.to_string())?;
     if systemctl(&["is-active", "--quiet", UNIT]) {
+        let _ = systemctl(&["reset-failed", UNIT]);
         run("systemctl", &["--user", "restart", UNIT])?;
     }
     Ok("Saved.".into())
@@ -335,6 +344,12 @@ mod tests {
             Some("just one line")
         );
         assert_eq!(last_error(""), None);
+        // A deliberate stop after an older error is what's shown.
+        let stopped = "Error: old failure\nfarsight-agent: stopped: screen sharing was declined at the desktop\nDeactivated successfully.\n";
+        assert_eq!(
+            last_error(stopped).as_deref(),
+            Some("farsight-agent: stopped: screen sharing was declined at the desktop")
+        );
         // Control and bidi-override characters never reach the window.
         assert_eq!(strip_colours("a\u{7}b\u{202e}c"), "abc");
         assert_eq!(strip_colours(&"x".repeat(1000)).len(), MAX_SHOWN);

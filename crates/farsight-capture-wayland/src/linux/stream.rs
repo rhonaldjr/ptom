@@ -51,6 +51,7 @@ pub(super) async fn spawn(
     node_id: u32,
     events: mpsc::Sender<CaptureEvent>,
     frame_size: Arc<FrameSize>,
+    logical_size: Option<(u32, u32)>,
 ) -> Result<PipeWire, CaptureError> {
     let (ready_tx, ready_rx) = oneshot::channel();
     let (done_tx, done) = oneshot::channel();
@@ -63,6 +64,7 @@ pub(super) async fn spawn(
                 node_id,
                 events,
                 frame_size,
+                logical_size,
                 reason: Rc::clone(&reason),
             };
             let mut ready = Some(ready_tx);
@@ -91,6 +93,7 @@ struct Thread {
     node_id: u32,
     events: mpsc::Sender<CaptureEvent>,
     frame_size: Arc<FrameSize>,
+    logical_size: Option<(u32, u32)>,
     reason: Rc<RefCell<Option<String>>>,
 }
 
@@ -120,6 +123,7 @@ impl Thread {
         let capture = Rc::new(RefCell::new(Capture {
             events: self.events,
             frame_size: self.frame_size,
+            logical_size: self.logical_size,
             format: None,
             throttle: Throttle::new(MAX_FPS),
             damage: Accumulator::default(),
@@ -234,6 +238,8 @@ struct CursorState {
 struct Capture {
     events: mpsc::Sender<CaptureEvent>,
     frame_size: Arc<FrameSize>,
+    /// The stream's size in the portal's logical units, if it said.
+    logical_size: Option<(u32, u32)>,
     format: Option<VideoFormatInfo>,
     throttle: Throttle,
     /// Damage since the last delivered frame.
@@ -366,8 +372,17 @@ impl Capture {
         else {
             return;
         };
+        // On a scaled display the compositor's damage may be in logical
+        // units, covering only part of each change; then the agent compares
+        // frames itself (`None`), which is always right (user feedback).
+        // `logical_size` is from when sharing started: after a resolution
+        // change this may compare needlessly (slower), never wrongly.
+        let scaled = self
+            .logical_size
+            .is_some_and(|logical| logical != (info.width, info.height));
         let damage = buffer
             .find_meta::<MetaVideoDamage>()
+            .filter(|_| !scaled)
             .and_then(|meta| damage::convert(meta.iter().map(region_of), width, height));
 
         let Some(data) = buffer.datas_mut().first_mut() else {

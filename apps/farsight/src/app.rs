@@ -191,7 +191,9 @@ impl cosmic::Application for App {
                     .map(|_| Message::ResizeTick),
             );
         }
-        if let Some(attempt) = self.scan_attempt {
+        // Active scanning only while Home (with the list) is showing, never
+        // while viewing a computer (user feedback).
+        if let Some(attempt) = self.scan_attempt.filter(|_| self.active.is_none()) {
             subscriptions.push(
                 Subscription::run_with(attempt, crate::nearby::scan)
                     .map(|d| Message::Nearby(NearbyMessage::Discovery(d))),

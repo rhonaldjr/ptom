@@ -19,7 +19,12 @@ pub enum Event {
     Clipboard(String),
     /// Keyboard LEDs: bit 0 Scroll, 1 Num, 2 Caps Lock.
     Leds(u8),
+    /// Capture failed; the agent exits with an error (systemd may restart it).
     Closed(String),
+    /// The person at the desktop stopped sharing: a clean exit, not restarted.
+    /// (Only the Wayland portal reports this.)
+    #[cfg_attr(not(feature = "wayland"), allow(dead_code))]
+    Stopped(String),
 }
 
 /// Sends input to the desktop.
@@ -170,6 +175,7 @@ async fn start_wayland(token_file: &Path, view_only: bool) -> Result<Capture> {
                     c.and_then(|c| Cursor::from_rgba(c.width, c.height, c.hotspot, c.rgba)),
                 ),
                 CaptureEvent::Closed(reason) => Event::Closed(reason),
+                CaptureEvent::Stopped(reason) => Event::Stopped(reason),
             };
             if tx.send(mapped).await.is_err() {
                 return;

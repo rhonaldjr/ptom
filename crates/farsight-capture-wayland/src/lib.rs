@@ -53,8 +53,12 @@ pub enum CaptureEvent {
     Frame(Frame),
     /// The pointer changed shape (`Some`) or was hidden (`None`).
     Cursor(Option<CursorShape>),
-    /// Capture ended; the text says why. No events follow.
+    /// Capture failed (e.g. the stream went away); the text says why. No
+    /// events follow.
     Closed(String),
+    /// The person at the desktop stopped sharing (from the desktop's own
+    /// controls). A deliberate stop, not a failure. No events follow.
+    Stopped(String),
 }
 
 /// How to start a capture.
@@ -271,7 +275,9 @@ mod tests {
                 CaptureEvent::Cursor(shape) => {
                     println!("cursor {:?}", shape.map(|s| (s.width, s.height, s.hotspot)));
                 }
-                CaptureEvent::Closed(reason) => panic!("closed: {reason}"),
+                CaptureEvent::Closed(reason) | CaptureEvent::Stopped(reason) => {
+                    panic!("closed: {reason}")
+                }
             }
         }
         assert!(frames > 0, "no frames in 5 s");

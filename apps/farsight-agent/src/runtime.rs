@@ -114,6 +114,9 @@ fn millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
+/// Marks a deliberate stop in the log, for Farsight Sharing to show.
+pub const STOPPED_TAG: &str = "stopped:";
+
 /// How long a viewer may take to log in, counted from connecting.
 fn login_deadline(session: &ServerSession) -> Duration {
     if session.security_chosen() {
@@ -238,6 +241,13 @@ impl Agent {
                     let _ = self.clipboard.send(text);
                 }
                 Event::Closed(reason) => anyhow::bail!("the desktop went away: {reason}"),
+                // The person stopped sharing at the desktop: a clean stop
+                // (restarting would only ask them again in the portal's
+                // dialog). The tag lets Farsight Sharing show this reason.
+                Event::Stopped(reason) => {
+                    warn!("{STOPPED_TAG} {reason}");
+                    return Ok(());
+                }
             }
         }
         Ok(())

@@ -116,6 +116,14 @@ fn main() -> ExitCode {
     };
     match runtime.block_on(run(options, passed, session_umask)) {
         Ok(()) => ExitCode::SUCCESS,
+        // Not a failure: systemd mustn't restart us into the same dialog.
+        Err(error) if declined(&error) => {
+            eprintln!(
+                "farsight-agent: {} screen sharing was declined at the desktop",
+                runtime::STOPPED_TAG
+            );
+            ExitCode::SUCCESS
+        }
         Err(error) => {
             eprintln!("farsight-agent: {error:#}");
             ExitCode::FAILURE
@@ -463,6 +471,25 @@ fn host_name() -> String {
         .map(|h| h.trim().to_owned())
         .filter(|h| !h.is_empty())
         .unwrap_or_else(|| "farsight".into())
+}
+
+/// Whether the person at the desktop said no to sharing (the portal dialog).
+fn declined(error: &anyhow::Error) -> bool {
+    #[cfg(feature = "wayland")]
+    {
+        use farsight_capture_wayland::CaptureError;
+        error.chain().any(|e| {
+            matches!(
+                e.downcast_ref::<CaptureError>(),
+                Some(CaptureError::Declined)
+            )
+        })
+    }
+    #[cfg(not(feature = "wayland"))]
+    {
+        let _ = error;
+        false
+    }
 }
 
 /// A Wayland compositor's socket in our runtime folder. As a systemd user

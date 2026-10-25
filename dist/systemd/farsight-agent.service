@@ -10,13 +10,17 @@ Description=Farsight desktop sharing agent
 Documentation=https://github.com/rhonaldjr/ptom
 PartOf=graphical-session.target
 After=graphical-session.target
+StartLimitIntervalSec=600
+StartLimitBurst=3
 
 [Service]
 ExecStart=/usr/bin/farsight-agent
 # `systemctl --user reload` re-reads passwords set with farsight-passwd.
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
-RestartSec=5
+# Slow and limited restarts: each start may show the desktop's sharing
+# dialog, so a failing agent must not loop (Farsight Sharing shows why).
+RestartSec=30
 
 # Hardening (ADR-0009). The agent runs as you and needs your session's
 # D-Bus, Wayland/X11 sockets and PipeWire, so home stays readable.
