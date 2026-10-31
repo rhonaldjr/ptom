@@ -133,7 +133,7 @@ jobs:
           tool: git-cliff
       - name: Release notes
         run: git cliff --unreleased --tag "v$VERSION" --strip all > RELEASE_NOTES.md
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ env.VERSION }}
           target_commitish: ${{ github.sha }}
